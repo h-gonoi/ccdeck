@@ -1,0 +1,596 @@
+/* ccdeck — 主役は「セッションの状態」。琥珀は “あなたの番です” にだけ使う色。 */
+:root {
+  --bg:        #131311;
+  --panel:     #191917;
+  --raised:    #201f1c;
+  --line:      #2b2a26;
+  --line-soft: #232220;
+
+  --text:  #e6e3dc;
+  --dim:   #8d8a82;
+  --faint: #5c5a54;
+
+  --amber:      #e0a145;   /* 要対応。画面で唯一の彩度の高い色 */
+  --amber-soft: rgba(224, 161, 69, 0.11);
+  --run:        #6f9a72;   /* 実行中は「待てばいい」ので控えめに */
+  --dead:       #a8615b;
+
+  --radius: 3px;
+  --s-xs: 4px; --s-sm: 8px; --s-md: 14px; --s-lg: 22px; --s-xl: 36px;
+
+  --rail: 264px;
+  --drawer: 380px;         /* 左右であえて幅を揃えない */
+
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  --ui: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Helvetica Neue", sans-serif;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--ui);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+button { font-family: inherit; cursor: pointer; }
+
+.app {
+  display: grid;
+  grid-template-columns: var(--rail) minmax(0, 1fr);
+  grid-template-rows: 100vh;
+  height: 100vh;
+  overflow: hidden;
+  transition: grid-template-columns 0.16s ease;
+}
+.app--narrow { grid-template-columns: 0 minmax(0, 1fr); }
+.app--narrow.with-drawer { grid-template-columns: 0 minmax(0, 1fr) var(--drawer); }
+.app.with-drawer { grid-template-columns: var(--rail) minmax(0, 1fr) var(--drawer); }
+
+/* ---------- 左レール ---------- */
+.rail {
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;   /* 畳んだときに中身がはみ出さないように */
+}
+.rail__head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--s-md) var(--s-md) var(--s-sm);
+}
+.brand {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+.brand::after { content: "·"; color: var(--amber); margin-left: 5px; }
+
+.rail__scroll { overflow-y: auto; padding-bottom: var(--s-xl); flex: 1; min-height: 0; }
+.rail__title {
+  display: flex; align-items: center; gap: var(--s-sm);
+  margin: var(--s-lg) 0 var(--s-sm);
+  padding: 0 var(--s-md);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.rail__title--projects { margin-top: var(--s-xl); }
+.rail__count { color: var(--dim); letter-spacing: 0; }
+.rail__empty {
+  margin: 0 var(--s-md);
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.sessions, .projects { list-style: none; margin: 0; padding: 0; }
+
+/* セッション行：左の縦バーで状態を読ませる。リスト全体が状態の帯になる。 */
+.session {
+  position: relative;
+  padding: 10px 10px 10px 20px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+.session::before {
+  content: "";
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--faint);
+}
+.session:hover { background: var(--raised); }
+.session--paned { background: var(--raised); }
+.session--active { background: var(--raised); }
+.session--active::after {
+  content: ""; position: absolute; right: 0; top: 0; bottom: 0; width: 1px; background: var(--amber);
+}
+.session--running::before { background: var(--run); }
+.session--attention::before { background: var(--amber); }
+.session--exited::before { background: var(--dead); }
+
+/* 要対応だけは行そのものを色づける。ここが画面で最も強い信号。 */
+.session--attention { background: var(--amber-soft); }
+.session--attention:hover { background: rgba(224, 161, 69, 0.16); }
+
+.session__top { display: flex; align-items: center; gap: var(--s-sm); }
+.session__name {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* 常に薄く置いておく。出たり消えたりすると狙いを定められないため。
+   行の余白に食い込ませて、見た目より広く押せるようにしている。 */
+.session__kill {
+  flex: none;
+  width: 24px; height: 24px;
+  margin: -6px -8px -6px 0;
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: none; border-radius: var(--radius);
+  color: var(--faint);
+  font-size: 15px; line-height: 1;
+  opacity: 0.22;
+  transition: opacity 0.12s ease, background-color 0.12s ease, color 0.12s ease;
+}
+.session:hover .session__kill { opacity: 0.85; }
+.session__kill:hover {
+  opacity: 1;
+  background: rgba(168, 97, 91, 0.2);
+  color: var(--dead);
+}
+
+/* 走っている作業を一発で消さないよう、行の中で一度だけ聞く */
+.session--confirm { background: rgba(168, 97, 91, 0.13); }
+.session__confirm {
+  display: flex; align-items: center; gap: var(--s-sm);
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--dead);
+}
+.session__confirm { flex-wrap: wrap; }
+.session__confirm button {
+  background: none; border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 11px; padding: 4px 12px;
+  transition: border-color 0.12s ease, color 0.12s ease, background-color 0.12s ease;
+}
+.session__confirm button:first-of-type:hover {
+  background: rgba(168, 97, 91, 0.18); border-color: var(--dead); color: var(--dead);
+}
+.session__confirm button:hover { border-color: var(--dead); color: var(--dead); }
+
+.session--dragging { opacity: 0.35; }
+
+.session__unread {
+  margin-left: auto; flex: none;
+  width: 6px; height: 6px; margin-right: 4px; border-radius: 50%;
+  background: var(--amber);
+}
+.session__top > .session__kill:first-of-type { margin-left: auto; }
+.session__meta {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--faint);
+  display: flex; gap: 5px;
+}
+.session--attention .session__meta { color: var(--amber); }
+.session__state--running { color: var(--run); }
+
+/* 実行中だけが動く。他は静止。 */
+.session--running .session__state--running::before {
+  content: "";
+  display: inline-block;
+  width: 5px; height: 5px; margin-right: 5px;
+  border-radius: 50%;
+  background: var(--run);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+/* 他のターミナルで動いているセッション。状態の強さは同じだが、
+   こちらからは打てないので名前を一段落として「開くもの」として見せる。 */
+.session--ext .session__name { color: var(--dim); font-weight: 400; }
+.session--ext .session__jump {
+  margin-left: auto; flex: none;
+  font-size: 11px; color: var(--faint);
+  transition: color 0.12s ease;
+}
+.session--ext:hover .session__jump { color: var(--amber); }
+.session--attention.session--ext .session__name { color: var(--text); }
+
+.project {
+  display: flex; align-items: center; gap: var(--s-sm);
+  padding: 7px var(--s-md) 7px 20px;
+  color: var(--dim);
+  cursor: pointer;
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.project:hover { background: var(--raised); color: var(--text); }
+.project__name {
+  flex: 1; min-width: 0;
+  font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.project__branch {
+  flex: none;
+  font-family: var(--mono); font-size: 10px; color: var(--faint);
+  max-width: 96px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.project__changes {
+  flex: none; font-family: var(--mono); font-size: 10px;
+  color: var(--amber); opacity: 0.75;
+}
+
+/* 最近使ったものと、それ以外の境目。見出しは足さず、線一本で切る。 */
+.rail__sep {
+  height: 0;
+  margin: var(--s-sm) var(--s-md) var(--s-sm) 20px;
+  border-top: 1px solid var(--line-soft);
+}
+
+/* ---------- 中央 ---------- */
+.stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
+.stage__head {
+  display: flex; align-items: center;
+  gap: var(--s-md);
+  padding: var(--s-sm) var(--s-md);
+  border-bottom: 1px solid var(--line-soft);
+}
+.stage__rail { flex: none; font-size: 12px; }
+.stage__rail--on { color: var(--dim); }   /* 開いているときだけ少し濃く */
+.stage__id { display: flex; align-items: baseline; gap: var(--s-sm); min-width: 0; flex: 1; }
+.stage__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; align-self: center; }
+.stage__dot--running { background: var(--run); }
+.stage__dot--attention { background: var(--amber); }
+.stage__dot--exited { background: var(--dead); }
+.stage__name { font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+.stage__path {
+  font-size: 11px; color: var(--faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.stage__actions { display: flex; gap: var(--s-sm); flex: none; }
+
+/* 分割表示。枠線代わりに 1px の隙間を空け、地の色を透かせる */
+.terms {
+  flex: 1; min-height: 0;
+  display: grid;
+  gap: 1px;
+  background: var(--line-soft);
+  grid-auto-rows: minmax(0, 1fr);
+}
+.terms[data-count="1"] { grid-template-columns: 1fr; }
+.terms[data-count="2"],
+.terms[data-count="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.terms[data-count="3"],
+.terms[data-count="5"], .terms[data-count="6"],
+.terms[data-count="7"], .terms[data-count="8"], .terms[data-count="9"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.terms[data-count="10"], .terms[data-count="11"], .terms[data-count="12"] {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.pane {
+  display: flex; flex-direction: column;
+  min-width: 0; min-height: 0;
+  background: var(--bg);
+}
+.pane[hidden] { display: none; }
+.pane--active { box-shadow: inset 0 0 0 1px var(--amber); }
+.pane--drop { box-shadow: inset 3px 0 0 0 var(--amber); }
+.terms--drop { outline: 1px dashed var(--amber); outline-offset: -2px; }
+.pane__head { cursor: grab; }
+.pane__head:active { cursor: grabbing; }
+.pane__head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 7px;
+  border-bottom: 1px solid var(--line-soft);
+  flex: none;
+}
+.pane__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); flex: none; }
+.pane__dot--running { background: var(--run); animation: breathe 1.6s ease-in-out infinite; }
+.pane__dot--attention { background: var(--amber); }
+.pane__dot--exited { background: var(--dead); }
+.pane__name {
+  flex: 1; min-width: 0;
+  font-family: var(--mono); font-size: 10.5px; color: var(--dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pane--active .pane__name { color: var(--text); }
+.pane__close {
+  flex: none;
+  width: 20px; height: 20px; margin-right: -4px;
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: none; border-radius: var(--radius);
+  color: var(--faint); font-size: 14px; line-height: 1;
+  opacity: 0.35;
+  transition: color 0.12s ease, opacity 0.12s ease, background-color 0.12s ease;
+}
+.pane:hover .pane__close { opacity: 0.9; }
+.pane__close:hover { opacity: 1; background: var(--raised); color: var(--text); }
+.pane__body { flex: 1; min-height: 0; padding: 3px 0 2px 5px; }
+
+.welcome { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 0 12%; }
+.welcome--drop { outline: 1px dashed var(--amber); outline-offset: -12px; }
+.welcome__lead { margin: 0 0 var(--s-md); font-size: 15px; color: var(--dim); }
+.welcome__sub { margin: 0; font-size: 12.5px; line-height: 2; color: var(--faint); max-width: 44ch; }
+.welcome code { font-family: var(--mono); color: var(--amber); }
+
+/* ---------- 右ドロワー ---------- */
+.drawer {
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  display: flex; flex-direction: column; min-height: 0;
+}
+.drawer__head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--s-md);
+  border-bottom: 1px solid var(--line-soft);
+}
+.drawer__branch { font-family: var(--mono); font-size: 12px; font-weight: 500; }
+.drawer__track { font-family: var(--mono); font-size: 10px; color: var(--faint); margin-left: var(--s-sm); }
+.drawer__body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+/* 変更一覧は上に固定枠で置き、差分・エディタに残りを全部渡す */
+.changes-wrap { flex: none; max-height: 34%; overflow-y: auto; border-bottom: 1px solid var(--line-soft); }
+.pane { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.pane__tabs {
+  display: flex; align-items: center; gap: var(--s-sm);
+  padding: var(--s-sm) var(--s-md);
+  border-bottom: 1px solid var(--line-soft);
+}
+.pane__file {
+  flex: 1; min-width: 0;
+  font-family: var(--mono); font-size: 10px; color: var(--faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left;
+}
+.tab {
+  background: none; border: none;
+  color: var(--faint);
+  font-size: 11px; padding: 2px 0;
+  border-bottom: 1px solid transparent;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.tab:hover { color: var(--text); }
+.tab--active { color: var(--amber); border-bottom-color: var(--amber); }
+.editor { flex: 1; min-height: 0; overflow: hidden; }
+.editor .cm-editor { height: 100%; font-size: 11.5px; }
+.editor .cm-scroller { font-family: var(--mono); }
+.drawer__empty { padding: var(--s-md); color: var(--faint); font-size: 12px; }
+
+.changes { list-style: none; margin: 0; padding: var(--s-sm) 0; }
+.change {
+  display: flex; align-items: center; gap: var(--s-sm);
+  padding: 5px var(--s-md);
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--dim);
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.change:hover { background: var(--raised); color: var(--text); }
+.change--selected { background: var(--raised); color: var(--text); }
+.change__mark {
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  width: 14px; flex: none; text-align: center;
+}
+.change__mark--M { color: var(--amber); }
+.change__mark--A, .change__mark--\? { color: var(--run); }
+.change__mark--D { color: var(--dead); }
+.change__path {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  direction: rtl; text-align: left;   /* 長いパスは先頭を削る */
+}
+.change__staged { margin-left: auto; flex: none; color: var(--run); font-size: 10px; }
+
+.diff {
+  margin: 0;
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: var(--s-sm) 0 var(--s-lg);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.55;
+  overflow-x: auto;
+  white-space: pre;
+}
+.diff-line { padding: 0 var(--s-md); }
+.diff-line--add { background: rgba(111, 154, 114, 0.11); color: #a5c8a7; }
+.diff-line--del { background: rgba(168, 97, 91, 0.11); color: #d29b96; }
+.diff-line--hunk { color: var(--faint); background: var(--raised); }
+.diff-line--meta { color: var(--faint); }
+
+.drawer__foot { border-top: 1px solid var(--line); padding: var(--s-md); }
+.drawer__foot textarea {
+  width: 100%; resize: vertical;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--ui);
+  font-size: 12px;
+  padding: var(--s-sm);
+  transition: border-color 0.14s ease;
+}
+.drawer__foot textarea:focus { outline: none; border-color: var(--amber); }
+.drawer__buttons { display: flex; gap: var(--s-sm); margin-top: var(--s-sm); }
+.drawer__log {
+  margin: var(--s-sm) 0 0;
+  font-family: var(--mono); font-size: 10.5px; line-height: 1.6;
+  color: var(--faint);
+  white-space: pre-wrap;
+  max-height: 76px; overflow-y: auto;
+}
+
+/* ---------- ボタン ---------- */
+.primary-btn {
+  background: var(--amber);
+  color: #1b1508;
+  border: none;
+  border-radius: var(--radius);
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color 0.14s ease;
+}
+.primary-btn:hover { background: #edb15b; }
+.primary-btn:disabled { background: var(--line); color: var(--faint); cursor: default; }
+
+.ghost-btn {
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 5px 11px;
+  font-size: 11.5px;
+  white-space: nowrap;
+  transition: border-color 0.14s ease, color 0.14s ease;
+}
+.ghost-btn:hover { border-color: var(--faint); color: var(--text); }
+.ghost-btn--danger:hover { border-color: var(--dead); color: var(--dead); }
+
+.icon-btn {
+  background: none; border: none;
+  color: var(--faint);
+  font-size: 15px; line-height: 1;
+  padding: 2px 4px;
+  transition: color 0.12s ease;
+}
+.icon-btn:hover { color: var(--amber); }
+
+.link-btn {
+  margin-left: auto;
+  background: none; border: none;
+  color: var(--faint);
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
+  transition: color 0.12s ease;
+}
+.link-btn:hover { color: var(--text); }
+
+.pill {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--amber);
+}
+
+/* 右クリックの操作盤。行のどこを押しても出るので、小さな × を狙う必要がない。 */
+.ctx {
+  position: fixed; z-index: 30;
+  min-width: 210px;
+  padding: 4px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+.ctx__title {
+  padding: 6px 10px 7px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
+  color: var(--faint);
+  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ctx button {
+  display: block; width: 100%;
+  padding: 7px 10px;
+  text-align: left;
+  background: none; border: none; border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--ui); font-size: 12px;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+.ctx button:hover { background: var(--panel); }
+.ctx button.ctx--danger { color: var(--dead); }
+.ctx button.ctx--danger:hover { background: rgba(168, 97, 91, 0.18); }
+
+/* ＋ から出るプロジェクト選び。操作盤と同じ「板」で、モーダルにはしない。 */
+.picker {
+  position: fixed; z-index: 40;
+  display: flex; flex-direction: column;
+  width: 296px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.picker__input {
+  width: 100%;
+  padding: 9px 11px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text);
+  font-family: var(--ui); font-size: 12.5px;
+  outline: none;
+}
+.picker__input::placeholder { color: var(--faint); }
+.picker__list {
+  list-style: none; margin: 0;
+  padding: 4px;
+  max-height: 306px;
+  overflow-y: auto;
+}
+.picker__item {
+  display: flex; align-items: center; gap: var(--s-sm);
+  padding: 7px 8px;
+  border-radius: var(--radius);
+  color: var(--dim);
+  cursor: pointer;
+}
+.picker__item--on { background: var(--panel); color: var(--text); }
+.picker__name {
+  flex: 1; min-width: 0;
+  font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.picker__live {
+  flex: none; font-family: var(--mono); font-size: 10px; color: var(--run);
+}
+.picker__when {
+  flex: none; font-family: var(--mono); font-size: 10px; color: var(--faint);
+}
+.picker__sep {
+  height: 0;
+  margin: 5px 8px;
+  border-top: 1px solid var(--line-soft);
+}
+.picker__empty {
+  margin: 0;
+  padding: 10px 11px 13px;
+  color: var(--faint); font-size: 12px;
+}
+
+/* 操作の結果だけをそっと伝える。消えるまで 3.2 秒。 */
+.toast {
+  position: fixed;
+  left: calc(var(--rail) + var(--s-lg));
+  bottom: var(--s-lg);
+  z-index: 20;
+  max-width: 46ch;
+  padding: 9px 14px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--amber);
+  border-radius: var(--radius);
+  font-size: 12px;
+  color: var(--text);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  animation: toast-in 0.18s ease;
+}
+@keyframes toast-in { from { opacity: 0; transform: translateY(5px); } }
+
+/* スクロールバーは主張させない */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2f2e29; border-radius: 5px; border: 2px solid var(--panel); }
+::-webkit-scrollbar-thumb:hover { background: #403e37; }

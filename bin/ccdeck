@@ -1,0 +1,68 @@
+#!/bin/zsh
+# ccdeck — 複数の Claude Code セッションを束ねる軽量デッキ
+set -e
+
+ROOT="${0:A:h:h}"
+PORT="${CCDECK_PORT:-7788}"
+URL="http://127.0.0.1:${PORT}"
+STATE_DIR="$HOME/.ccdeck"
+LOG="$STATE_DIR/server.log"
+PID_FILE="$STATE_DIR/server.pid"
+CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+mkdir -p "$STATE_DIR"
+
+alive() { curl -sf -o /dev/null --max-time 1 "$URL/api/sessions"; }
+
+start_server() {
+  if alive; then return 0; fi
+  # セッションを孫プロセスとして生かすため、親シェルから完全に切り離す
+  (cd "$ROOT" && nohup node server/index.js >>"$LOG" 2>&1 & echo $! >"$PID_FILE")
+  for _ in {1..40}; do
+    alive && return 0
+    sleep 0.25
+  done
+  echo "サーバーが起動しませんでした。ログ: $LOG" >&2
+  tail -5 "$LOG" >&2
+  return 1
+}
+
+open_window() {
+  if [[ ! -x "$CHROME" ]]; then
+    echo "Chrome が見つかりません。ブラウザで $URL を開いてください。"
+    return 0
+  fi
+  # --app はアドレスバーもタブもない独立ウィンドウ。既存 Chrome とプロセスを共有する。
+  "$CHROME" --app="$URL" >/dev/null 2>&1 &
+}
+
+case "${1:-open}" in
+  open)
+    start_server && open_window
+    echo "ccdeck → $URL"
+    ;;
+  start)
+    start_server && echo "サーバー起動: $URL"
+    ;;
+  stop)
+    if [[ -f "$PID_FILE" ]]; then
+      kill "$(cat "$PID_FILE")" 2>/dev/null || true
+      rm -f "$PID_FILE"
+    fi
+    pkill -f "node .*ccdeck/server/index.js" 2>/dev/null || true
+    echo "停止しました（走っていたセッションも終了します）"
+    ;;
+  status)
+    if alive; then
+      count=$(curl -s "$URL/api/sessions" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
+      echo "稼働中 · セッション ${count} 本 · $URL"
+    else
+      echo "停止中"
+    fi
+    ;;
+  log) tail -f "$LOG" ;;
+  *)
+    echo "使い方: ccdeck [open|start|stop|status|log]"
+    exit 1
+    ;;
+esac

@@ -1,0 +1,34 @@
+{
+  "name": "ccdeck",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "複数の Claude Code セッションを束ねる軽量デッキ",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/h-gonoi/ccdeck.git"
+  },
+  "scripts": {
+    "dev": "vite build --watch & node server/index.js",
+    "build": "vite build",
+    "start": "node server/index.js"
+  },
+  "dependencies": {
+    "@xterm/headless": "^6.0.0",
+    "express": "^5.2.1",
+    "node-pty": "^1.0.0",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lang-python": "^6.2.1",
+    "@codemirror/theme-one-dark": "^6.1.3",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/xterm": "^6.0.0",
+    "codemirror": "^6.0.2",
+    "vite": "^8.2.2"
+  }
+}

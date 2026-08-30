@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ccdeck</title>
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+<div class="app">
+
+  <aside class="rail">
+    <header class="rail__head">
+      <span class="brand">ccdeck</span>
+      <button class="icon-btn" id="btn-new" title="新しいセッション (⌘N)" aria-haspopup="true">＋</button>
+    </header>
+
+    <div class="rail__scroll">
+      <h2 class="rail__title">セッション <span class="rail__count" id="session-count"></span></h2>
+      <ul class="sessions" id="session-list"></ul>
+      <p class="rail__empty" id="session-empty">走っているセッションはありません。<br />下のプロジェクトを選ぶと始まります。</p>
+
+      <h2 class="rail__title rail__title--external" id="external-head" hidden>
+        他で動いている <span class="rail__count" id="external-count"></span>
+      </h2>
+      <ul class="sessions" id="external-list"></ul>
+
+      <h2 class="rail__title rail__title--projects">プロジェクト
+        <button class="link-btn" id="btn-rescan" title="再スキャン">更新</button>
+      </h2>
+      <ul class="projects" id="project-list"></ul>
+    </div>
+  </aside>
+
+  <main class="stage">
+    <header class="stage__head" id="stage-head">
+      <button class="icon-btn stage__rail" id="btn-rail" title="サイドバーの開閉 (⌘B)">☰</button>
+      <div class="stage__id" id="stage-id" hidden>
+        <span class="stage__dot" id="stage-dot"></span>
+        <span class="stage__name" id="stage-name"></span>
+        <span class="stage__path" id="stage-path"></span>
+      </div>
+      <div class="stage__actions" id="stage-actions" hidden>
+        <button class="ghost-btn" id="btn-tile" title="走っているセッションを並べる (⌘E)">並べる</button>
+        <button class="ghost-btn" id="btn-git">変更 <span class="pill" id="change-count">0</span></button>
+        <button class="ghost-btn ghost-btn--danger" id="btn-kill">終了</button>
+      </div>
+    </header>
+
+    <div class="terms" id="terms"></div>
+
+    <div class="welcome" id="welcome">
+      <p class="welcome__lead">まだ何も走っていません。</p>
+      <p class="welcome__sub">左のプロジェクトをクリックすると、そこで <code>claude</code> が立ち上がります。<br />
+      複数立ち上げても、手が空いたセッションは左のリストが琥珀色で教えます。</p>
+    </div>
+  </main>
+
+  <aside class="drawer" id="drawer" hidden>
+    <header class="drawer__head">
+      <div>
+        <span class="drawer__branch" id="git-branch"></span>
+        <span class="drawer__track" id="git-track"></span>
+      </div>
+      <button class="icon-btn" id="btn-git-close" title="閉じる">×</button>
+    </header>
+
+    <div class="drawer__body">
+      <div class="changes-wrap">
+        <ul class="changes" id="change-list"></ul>
+        <p class="drawer__empty" id="change-empty">変更はありません。</p>
+      </div>
+
+      <div class="pane" id="pane" hidden>
+        <div class="pane__tabs">
+          <button class="tab tab--active" id="tab-diff">差分</button>
+          <button class="tab" id="tab-edit">編集</button>
+          <span class="pane__file" id="open-file"></span>
+          <button class="link-btn" id="btn-save" hidden>保存 ⌘S</button>
+        </div>
+        <pre class="diff" id="diff-view"></pre>
+        <div class="editor" id="editor-host" hidden></div>
+      </div>
+    </div>
+
+    <footer class="drawer__foot">
+      <textarea id="commit-msg" rows="2" placeholder="コミットメッセージ"></textarea>
+      <div class="drawer__buttons">
+        <button class="ghost-btn" id="btn-stage-all">全部ステージ</button>
+        <button class="primary-btn" id="btn-commit">コミット</button>
+        <button class="ghost-btn" id="btn-push">push</button>
+      </div>
+      <p class="drawer__log" id="git-log"></p>
+    </footer>
+  </aside>
+
+  <!-- ＋ から出るプロジェクト選び。モーダルではなく、外を押せば消える板。 -->
+  <div class="picker" id="picker" hidden>
+    <input class="picker__input" id="picker-input" type="text"
+           placeholder="プロジェクトを選ぶ" autocomplete="off" spellcheck="false" />
+    <ul class="picker__list" id="picker-list"></ul>
+    <p class="picker__empty" id="picker-empty" hidden>合うプロジェクトがありません。</p>
+  </div>
+
+  <div class="ctx" id="ctx" hidden></div>
+  <div class="toast" id="toast" hidden></div>
+</div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
