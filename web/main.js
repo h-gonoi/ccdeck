@@ -19,6 +19,10 @@ const state = {
   paneMode: 'diff',
   railCollapsed: false,
   confirmKill: null,     // 終了確認を出している行
+  health: null,          // /api/health。LAN に出ているかはここで判る
+  devices: [],
+  pairCode: null,        // { code, expiresAt } 出している間だけ
+  confirmRevoke: null,   // 失効確認を出している端末
 };
 
 // ＋ から出すプロジェクト選び。開いている間だけ使う状態。
@@ -693,6 +697,111 @@ function choose(project) {
   openSession(project.path, project.name);
 }
 
+// ---------- スマホを繋ぐ ----------
+// LAN に出していないときは、この節ごと出さない。閉じているものを説明しても仕方がない。
+async function loadMobile() {
+  try {
+    state.health = await api.health();
+  } catch {
+    state.health = null;
+  }
+  const section = $('mobile-head');
+  if (!state.health?.lan) { section.hidden = true; return; }
+
+  section.hidden = false;
+  $('mobile-addr').textContent = `${state.health.address}:${state.health.port}`;
+  try {
+    const [code, devices] = await Promise.all([api.pairCode(), api.devices()]);
+    state.pairCode = code?.code ? code : null;
+    state.devices = devices;
+  } catch { /* 出せなければ黙って諦める */ }
+  renderMobile();
+}
+
+let pairTimer = null;
+
+function renderMobile() {
+  const live = state.pairCode && state.pairCode.expiresAt > Date.now();
+  $('mobile-code').hidden = !live;
+  $('btn-pair').textContent = live ? 'コードを消す' : 'コードを出す';
+
+  if (live) {
+    const left = Math.max(0, Math.round((state.pairCode.expiresAt - Date.now()) / 1000));
+    $('mobile-digits').textContent = state.pairCode.code;
+    $('mobile-left').textContent = `あと ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    if (!pairTimer) pairTimer = setInterval(renderMobile, 1000);
+  } else {
+    state.pairCode = null;
+    clearInterval(pairTimer);
+    pairTimer = null;
+  }
+
+  const list = $('device-list');
+  list.innerHTML = '';
+  for (const device of state.devices) {
+    const li = document.createElement('li');
+    li.className = 'device';
+    li.title = `${device.platform} · 登録 ${relTime(device.createdAt)}`;
+
+    li.append(
+      Object.assign(document.createElement('span'), {
+        className: 'device__name', textContent: device.name,
+      }),
+      Object.assign(document.createElement('span'), {
+        className: 'device__seen', textContent: relTime(device.lastSeen),
+      }),
+    );
+
+    if (state.confirmRevoke === device.id) {
+      // 戻せない操作なので、行の中でもう一度だけ聞く（母体の終了確認と同じ作法）
+      li.classList.add('device--confirm');
+      const yes = document.createElement('button');
+      yes.className = 'device__yes';
+      yes.textContent = '失効';
+      yes.onclick = () => revokeDevice(device);
+      const no = document.createElement('button');
+      no.className = 'device__no';
+      no.textContent = 'やめる';
+      no.onclick = () => { state.confirmRevoke = null; renderMobile(); };
+      li.append(yes, no);
+    } else {
+      const drop = document.createElement('button');
+      drop.className = 'device__drop';
+      drop.textContent = '×';
+      drop.title = 'この端末を失効させる';
+      drop.onclick = () => { state.confirmRevoke = device.id; renderMobile(); };
+      li.appendChild(drop);
+    }
+    list.appendChild(li);
+  }
+}
+
+async function togglePairCode() {
+  try {
+    if (state.pairCode) {
+      await api.cancelPairCode();
+      state.pairCode = null;
+    } else {
+      state.pairCode = await api.makePairCode();
+    }
+    renderMobile();
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+async function revokeDevice(device) {
+  state.confirmRevoke = null;
+  try {
+    await api.revokeDevice(device.id);
+    state.devices = await api.devices();
+    toast(`${device.name} を失効させました`);
+  } catch (err) {
+    toast(err.message);
+  }
+  renderMobile();
+}
+
 function renderStage() {
   const session = state.sessions.find((s) => s.id === state.activeId);
   const tiled = state.panes.length > 1;
@@ -874,6 +983,7 @@ $('btn-rescan').onclick = async () => {
   renderProjects();
 };
 
+$('btn-pair').onclick = () => togglePairCode();
 $('btn-rail').onclick = () => toggleRail();
 $('btn-tile').onclick = () => tileAll();
 
@@ -957,4 +1067,5 @@ setInterval(() => { if (state.sessions.length) renderSessions(); }, 30000);
   connect();
   state.projects = sortProjects(await api.projects());
   renderProjects();
+  loadMobile();
 })();

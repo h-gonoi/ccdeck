@@ -29,6 +29,20 @@
         <button class="link-btn" id="btn-rescan" title="再スキャン">更新</button>
       </h2>
       <ul class="projects" id="project-list"></ul>
+
+      <!-- LAN に出しているときだけ現れる。閉じているときは何も見せない。 -->
+      <section id="mobile-head" hidden>
+        <h2 class="rail__title rail__title--projects">スマホ</h2>
+        <p class="mobile__addr" id="mobile-addr"></p>
+        <div class="mobile__code" id="mobile-code" hidden>
+          <span class="mobile__digits" id="mobile-digits"></span>
+          <span class="mobile__left" id="mobile-left"></span>
+        </div>
+        <div class="mobile__act">
+          <button class="ghost-btn" id="btn-pair">コードを出す</button>
+        </div>
+        <ul class="devices" id="device-list"></ul>
+      </section>
     </div>
   </aside>
 

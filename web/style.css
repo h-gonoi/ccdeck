@@ -231,6 +231,61 @@ button { font-family: inherit; cursor: pointer; }
   color: var(--amber); opacity: 0.75;
 }
 
+/* スマホを繋ぐ節。LAN に出していないときは節ごと出さない。
+   琥珀は「あなたの番です」専用なので、ここでは使わない。 */
+.mobile__addr {
+  margin: 0 var(--s-md) var(--s-sm) 20px;
+  font-family: var(--mono); font-size: 11px; color: var(--dim);
+}
+.mobile__code {
+  display: flex; align-items: baseline; gap: var(--s-sm);
+  margin: 0 var(--s-md) var(--s-sm) 20px;
+  padding: 8px 10px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.mobile__digits {
+  font-family: var(--mono); font-size: 17px; letter-spacing: 0.18em;
+  color: var(--text);
+}
+.mobile__left {
+  margin-left: auto;
+  font-family: var(--mono); font-size: 10px; color: var(--faint);
+}
+.mobile__act { padding: 0 var(--s-md) 0 20px; }
+
+.devices { list-style: none; margin: var(--s-sm) 0 0; padding: 0; }
+.device {
+  display: flex; align-items: center; gap: var(--s-sm);
+  padding: 7px var(--s-md) 7px 20px;
+  color: var(--dim);
+}
+.device__name {
+  flex: 1; min-width: 0;
+  font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.device__seen {
+  flex: none; font-family: var(--mono); font-size: 10px; color: var(--faint);
+}
+.device__drop {
+  flex: none;
+  background: none; border: none; color: var(--faint);
+  font-size: 13px; line-height: 1; padding: 0 2px;
+  transition: color 0.12s ease;
+}
+.device__drop:hover { color: var(--dead); }
+.device--confirm { color: var(--text); }
+.device--confirm .device__seen { display: none; }
+.device__yes, .device__no {
+  flex: none;
+  background: none; border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 2px 7px; font-size: 10.5px; color: var(--dim);
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+.device__yes:hover { border-color: var(--dead); color: var(--dead); }
+.device__no:hover { border-color: var(--faint); color: var(--text); }
+
 /* 最近使ったものと、それ以外の境目。見出しは足さず、線一本で切る。 */
 .rail__sep {
   height: 0;

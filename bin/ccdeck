@@ -12,12 +12,20 @@ CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 mkdir -p "$STATE_DIR"
 
+# --lan: サーバーを LAN に出す。付けない限りループバックに閉じたまま。
+SERVER_ARGS=""
+ARGS=()
+for arg in "$@"; do
+  if [[ "$arg" == "--lan" ]]; then SERVER_ARGS="--lan"; else ARGS+=("$arg"); fi
+done
+set -- "${ARGS[@]}"
+
 alive() { curl -sf -o /dev/null --max-time 1 "$URL/api/sessions"; }
 
 start_server() {
   if alive; then return 0; fi
   # セッションを孫プロセスとして生かすため、親シェルから完全に切り離す
-  (cd "$ROOT" && nohup node server/index.js >>"$LOG" 2>&1 & echo $! >"$PID_FILE")
+  (cd "$ROOT" && nohup node server/index.js $SERVER_ARGS >>"$LOG" 2>&1 & echo $! >"$PID_FILE")
   for _ in {1..40}; do
     alive && return 0
     sleep 0.25
@@ -42,7 +50,12 @@ case "${1:-open}" in
     echo "ccdeck → $URL"
     ;;
   start)
-    start_server && echo "サーバー起動: $URL"
+    start_server || exit 1
+    if [[ -n "$SERVER_ARGS" ]]; then
+      tail -4 "$LOG"
+    else
+      echo "サーバー起動: $URL"
+    fi
     ;;
   stop)
     if [[ -f "$PID_FILE" ]]; then

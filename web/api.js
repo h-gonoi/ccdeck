@@ -12,6 +12,7 @@ const post = (url, body) => request(url, {
 });
 
 export const api = {
+  health: () => request('/api/health'),
   projects: () => request('/api/projects'),
   sessions: () => request('/api/sessions'),
   createSession: (body) => post('/api/sessions', body),
@@ -26,6 +27,12 @@ export const api = {
   gitPush: (cwd) => post('/api/git/push', { cwd }),
 
   focusExternal: (tty) => post('/api/external/focus', { tty }),
+
+  pairCode: () => request('/api/pair/code'),
+  makePairCode: () => post('/api/pair/code'),
+  cancelPairCode: () => request('/api/pair/code', { method: 'DELETE' }),
+  devices: () => request('/api/devices'),
+  revokeDevice: (id) => request(`/api/devices/${id}`, { method: 'DELETE' }),
 
   readFile: (cwd, path) =>
     request(`/api/files/read?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}`),

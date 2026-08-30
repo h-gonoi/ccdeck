@@ -10,9 +10,17 @@ import * as git from './git.js';
 import * as files from './files.js';
 import { scan, loadConfig, saveConfig, touchRecent } from './projects.js';
 import { listExternal, focusTty } from './external.js';
+import * as auth from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.CCDECK_PORT) || 7788;
+
+// LAN に出すのは明示したときだけ。既定は今まで通りループバックに閉じる。
+const LAN = process.argv.includes('--lan') || process.env.CCDECK_LAN === '1';
+const HOST = LAN ? '0.0.0.0' : '127.0.0.1';
+const VERSION = JSON.parse(
+  fsSync.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'),
+).version;
 
 const app = express();
 app.use(express.json({ limit: '8mb' }));
@@ -29,6 +37,57 @@ const wrap = (fn) => (req, res) => {
   });
 };
 
+// ---- 認証 ----
+// ループバックは素通し、それ以外は端末トークン。health と pair だけ開けておく
+// （アプリがペアリング前に「繋がるか・版が合うか」を確かめられるように）。
+const OPEN = new Set(['/health', '/pair']);
+
+app.use('/api', (req, res, next) => {
+  if (OPEN.has(req.path)) return next();
+  const who = auth.identify(req);
+  if (!who) return res.status(401).json({ error: 'この端末は登録されていません' });
+  req.who = who;
+  next();
+});
+
+// 端末の出し入れは、この Mac の前に座っている人だけができる
+const localOnly = (req, res, next) => {
+  if (req.who?.local) return next();
+  res.status(403).json({ error: 'この操作は Mac 側の画面からのみ行えます' });
+};
+
+app.get('/api/health', (req, res) => res.json({
+  name: 'ccdeck',
+  version: VERSION,
+  buildId: BUILD_ID,
+  hostname: os.hostname(),
+  lan: LAN,
+  address: LAN ? auth.lanAddress() : '127.0.0.1',
+  port: PORT,
+  capabilities: ['sessions', 'external', 'git', 'files', 'pair'],
+}));
+
+// ---- 端末 ----
+app.post('/api/pair', wrap(async (req, res) => {
+  const { device, token } = await auth.consumePairingCode(req.body?.code, req.body);
+  auth.audit(device, 'paired', device.platform);
+  res.json({ device, token });
+}));
+
+app.get('/api/pair/code', localOnly, (req, res) => res.json(auth.pairingCode() ?? {}));
+app.post('/api/pair/code', localOnly, (req, res) => res.json(auth.createPairingCode()));
+app.delete('/api/pair/code', localOnly, (req, res) => { auth.cancelPairing(); res.json({ ok: true }); });
+
+app.get('/api/devices', localOnly, (req, res) => res.json(auth.listDevices()));
+app.delete('/api/devices/:id', localOnly, wrap(async (req, res) => {
+  res.json({ ok: await auth.revokeDevice(req.params.id) });
+}));
+
+app.post('/api/push/register', wrap(async (req, res) => {
+  if (req.who.local) throw new Error('端末から登録してください');
+  res.json({ ok: await auth.setPushToken(req.who.id, req.body?.pushToken) });
+}));
+
 // ---- プロジェクト ----
 app.get('/api/projects', wrap(async (req, res) => res.json(await scan())));
 app.get('/api/config', wrap(async (req, res) => res.json(await loadConfig())));
@@ -40,13 +99,18 @@ app.get('/api/sessions', (req, res) => res.json(manager.list()));
 app.post('/api/sessions', wrap(async (req, res) => {
   const { cwd, title, command, cols, rows } = req.body;
   if (!cwd) throw new Error('cwd は必須です');
-  const session = manager.create({ cwd, title, command, cols, rows });
+  // LAN からの command は受けない。ここを緩めると LAN 越しの任意コマンド実行になる。
+  const session = manager.create({
+    cwd, title, cols, rows, command: req.who.local ? command : undefined,
+  });
+  auth.audit(req.who, 'session.create', cwd);
   // 「最近使った」の記録に失敗しても、セッションそのものは通す
   touchRecent(cwd).catch(() => {});
   res.json(session.toJSON());
 }));
 
 app.delete('/api/sessions/:id', (req, res) => {
+  auth.audit(req.who, 'session.kill', manager.get(req.params.id)?.cwd ?? req.params.id);
   res.json({ ok: manager.remove(req.params.id) });
 });
 
@@ -112,7 +176,22 @@ app.post('/api/files/write', wrap(async (req, res) => {
 
 // ---- WebSocket ----
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({ noServer: true });
+
+// upgrade を自分で受けて、通す前に相手を確かめる。
+// verifyClient に頼らないのは、断るときに 401 を返したいため。
+server.on('upgrade', (req, socket, head) => {
+  if (new URL(req.url, 'http://x').pathname !== '/ws') return socket.destroy();
+  const who = auth.identify(req);
+  if (!who) {
+    socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+    return socket.destroy();
+  }
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    ws.who = who;
+    wss.emit('connection', ws, req);
+  });
+});
 
 const broadcast = (payload) => {
   const msg = JSON.stringify(payload);
@@ -151,6 +230,7 @@ wss.on('connection', (ws) => {
   // このクライアントが画面に出しているセッション。出力はここに限って流す。
   const attached = new Set();
   const pumps = new Map();
+  const typed = new Set();   // このつながりで入力を始めたセッション（記録の重複よけ）
 
   const send = (payload) => { if (ws.readyState === 1) ws.send(JSON.stringify(payload)); };
   send({ type: 'hello', buildId: BUILD_ID });
@@ -182,7 +262,13 @@ wss.on('connection', (ws) => {
         break;
       }
       case 'detach': detach(msg.id); break;
-      case 'input': session?.write(msg.data); break;
+      case 'input': {
+        if (!session) break;
+        // 打鍵の中身は残さない（パスワードが混ざる）。触り始めたことだけ一度書く。
+        if (!typed.has(msg.id)) { typed.add(msg.id); auth.audit(ws.who, 'input', session.cwd); }
+        session.write(msg.data);
+        break;
+      }
       case 'resize': session?.resize(msg.cols, msg.rows); break;
       case 'read': session?.markRead(); break;
     }
@@ -191,8 +277,19 @@ wss.on('connection', (ws) => {
   ws.on('close', () => { for (const id of [...attached]) detach(id); });
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`ccdeck → http://127.0.0.1:${PORT}`);
+// 台帳を読み終える前に受け付けると、登録済みの端末を弾いてしまう
+await auth.ready;
+
+server.listen(PORT, HOST, () => {
+  if (!LAN) {
+    console.log(`ccdeck → http://127.0.0.1:${PORT}`);
+    return;
+  }
+  const address = auth.lanAddress() ?? '（アドレス不明）';
+  console.log(`ccdeck → http://${address}:${PORT}  (LAN に出しています)`);
+  console.log('  ⚠ 同じ Wi-Fi にいる誰でもここに到達できます。');
+  console.log('    繋げるのは登録した端末だけです。登録は Mac の画面から行ってください。');
+  console.log(`  記録: ${auth.AUDIT_PATH}`);
 });
 
 const shutdown = () => { manager.killAll(); process.exit(0); };

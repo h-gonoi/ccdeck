@@ -33,6 +33,7 @@ server/
   index.js     Express + WebSocket。API と静的配信。BUILD_ID もここ
   sessions.js  PTY の生成・保持と状態判定（このアプリの心臓）
   external.js  ccdeck 以外で立てられたセッションの検出とターミナル前面化
+  auth.js      LAN に出すときの関所（トークン・端末台帳・記録）
   git.js       git コマンドのラッパ
   projects.js  リポジトリの自動スキャンと「最近使った」順（~/.ccdeck/recent.json）
   files.js     ファイル読み書き（プロジェクト外は拒否する）
@@ -78,6 +79,24 @@ TUI の枠が崩れる。`syncPanes()` は **setVisible（fit して resize 送�
 
 named import が使えない。`import xtermHeadless from '@xterm/headless'` してから分解する。
 
+### LAN に出すときの関所を素通ししない
+
+`--lan` を付けると PTY を作れる口が LAN に開く。**ここを緩めると、
+その Wi-Fi にいる全員にシェルを配ることになる。** 触るときの決めごと:
+
+- **ループバックは素通し、それ以外はトークン。** 判定は `auth.identify()` 一か所。
+  `X-Forwarded-For` の類は見ない（詐称できる）
+- **LAN からの `POST /api/sessions` は `command` を捨てて `claude` 固定。**
+  ここを「便利だから」と通すと LAN 越しの任意コマンド実行になる
+- WebSocket は `server.on('upgrade')` で**通す前に**確かめる。
+  `verifyClient` を使わないのは、断るときに 401 を返したいため
+- `devices.json` に平文のトークンを書かない。持つのは SHA-256 だけ
+- 台帳を読み終える前に listen しない（`await auth.ready`）。
+  読み込み前のリクエストは登録済みの端末まで弾いてしまう
+
+記録は `~/.ccdeck/audit.log`。**打鍵の中身は残さない**（パスワードが混ざる）。
+セッションごとに「触り始めた」ことだけ一度書く。
+
 ### プロジェクトの並びは二か所にある
 
 「ピン → 最近使った順 → 名前」という順は `server/projects.js` の `compareProjects` と
@@ -121,3 +140,10 @@ Cursor の内蔵ターミナルは AppleScript で触れないので、そこは
 2. 承認待ちが `attention` になるか（`claude --permission-mode default` で作ると再現しやすい）
 3. 12 枠に並べたとき画面からはみ出さないか
 4. 画面を開き直して枠が復元されるか（localStorage の `ccdeck.panes`）
+
+`--lan` まわりを触ったら、これも見る。
+
+5. `--lan` なしの起動で、LAN のアドレスから一切繋がらないこと
+6. トークンなしの LAN からの REST と WebSocket が 401 で落ちること
+7. LAN から `command` を指定しても `claude` 以外が起動しないこと
+8. 失効させたトークンが、その場で 401 になること
