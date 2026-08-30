@@ -140,8 +140,8 @@ DHCP 変更時の **hostname → 最後に繋がった IP** のフォールバ�
 
 | 向き | type | 内容 |
 |---|---|---|
-| → | `attach` | `{ id, mode: 'replay' \| 'snapshot' }` を受けるよう拡張 |
-| ← | `snapshot` | `{ id, data, cols, rows }` 今の画面だけを ANSI で |
+| → | `attach` | `{ id, mode: 'replay' \| 'snapshot' \| 'text' }` を受けるよう拡張 |
+| ← | `snapshot` | `{ id, cols, rows }` に `data`（ANSI）か `text`（素の文字）が付く |
 | → | `claimSize` | `{ id, cols, rows }` 画面サイズの持ち主を奪う |
 | → | `releaseSize` | `{ id }` 返す |
 | ← | `sizeOwner` | `{ id, mine: bool, cols, rows }` 持ち主が変わったとき |
@@ -191,11 +191,22 @@ iOS はバックグラウンドで WebSocket を切る。**復帰のたびに 51
 | クライアント | attach の mode | 流れるもの |
 |---|---|---|
 | PC（既存） | `replay` | 生出力 512KB（今まで通り。既定を変えない） |
-| スマホ | `snapshot` | 今の画面だけ |
+| スマホ（M1・色を出さない） | `text` | 今の画面の文字だけ |
+| スマホ（M2・xterm.js） | `snapshot` | 今の画面を ANSI で |
 
-復帰の手順は **WS 張り直し → `attach { mode:'snapshot' }`**。
-snapshot mode の購読者には生の `output` を流さず、出力があったときに最大 2 回/秒へ間引いた
-新しい snapshot を送る。切れている間の出力は追わない。現在画面だけで追いつく。
+復帰の手順は **WS 張り直し → `attach { mode:'text' }`（M1）**。
+snapshot / text の購読者には生の `output` を流さず、出力があったときに最大 2 回/秒へ間引いた
+新しい画面を送る。切れている間の出力は追わない。現在画面だけで追いつく。
+
+### ANSI を送って向こうで剥がしてはいけない
+
+色の要らない相手に ANSI を送り、受け手で装飾を落とすと、
+**カーソル移動で作られた横の間隔まで消える。**
+`Claude Code   v2.1.231` が `Claude Codev2.1.231` になり、枠も表もずれる。
+
+桁数を知っていて、正しく組めるのはサーバー側だけ（判定用の headless xterm がある）。
+だから色の要らない相手には `text` を送る。`server/sessions.js` の `screenText()` が
+画面バッファを行ごとに読んで組み立てている。**受け手で ANSI を剥がす実装に戻さないこと。**
 
 > スクロールバックはこの方式では見られない。必要になったら別途 `history` を足す（未決）。
 
@@ -228,7 +239,7 @@ ccdeck                          ⟳
 
 ### 現在画面（M1）
 
-M1 は snapshot の ANSI 装飾を落とし、等幅のプレーンテキストとして縦横にスクロールして読む。
+M1 は `text` モードで受け取り、等幅のプレーンテキストとして縦横にスクロールして読む。
 トークンや WebSocket は React Native 側だけが持つ。キー入力はまだ送らない。
 
 ### ターミナル（M2）
@@ -330,7 +341,7 @@ mobile/
     api.ts              REST クライアント
     deck.ts             WebSocket・再接続・ハートビート・状態管理
     store.ts            接続先とトークンの SecureStore
-    ansi.ts             snapshot を読み取り用テキストへ変換
+    ansi.ts             古いサーバー向けの保険（ANSI しか来ないときだけ使う）
     screens/
       Sessions.tsx      一覧
       Screen.tsx        現在画面（読み取り専用）
@@ -354,7 +365,7 @@ M2 で WebView + xterm.js、M3 で通知のファイルと依存を加える。
 | `server/auth.js`（新規） | トークン発行・検証、端末台帳、ペアリングコード |
 | `server/push.js`（M3 で新規） | Expo Push への送信とレート制限 |
 | `server/index.js` | バインド先、認証、追加エンドポイント、サイズ所有権 |
-| `server/sessions.js` | `snapshot()`、`toJSON` に `cols` / `rows` / `sizeOwner` |
+| `server/sessions.js` | `snapshot()` / `screenText()`、`toJSON` に `cols` / `rows` / `sizeOwner` |
 | `bin/ccdeck` | `--lan` と起動時の QR |
 | `web/` | ペアリングコード、端末一覧、サイズを誰が持っているかの表示 |
 

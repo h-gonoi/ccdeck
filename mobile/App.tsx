@@ -54,7 +54,7 @@ export default function App() {
       ) : open ? (
         <Screen
           session={open}
-          ansi={deck.screens[open.id]}
+          screen={deck.screens[open.id]}
           onWatch={deck.watch}
           onBack={() => setView({ name: 'list' })}
         />

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
+import { toPlain } from './ansi';
 import { wsBase } from './api';
 import type { External, Link, Session } from './types';
 
@@ -125,7 +126,7 @@ export type DeckState = {
   up: boolean;
   sessions: Session[];
   external: External[];
-  screens: Record<string, string>;   // セッション id → いまの画面（ANSI のまま）
+  screens: Record<string, string>;   // セッション id → いまの画面（素のテキスト）
   watch: (id: string | null) => void;
   refresh: () => void;
 };
@@ -144,7 +145,7 @@ export function useDeck(link: Link | null): DeckState {
     if (before === id) return;
     if (before) deck.current?.send({ type: 'detach', id: before });
     watching.current = id;
-    if (id) deck.current?.send({ type: 'attach', id, mode: 'snapshot' });
+    if (id) deck.current?.send({ type: 'attach', id, mode: 'text' });
   }, []);
 
   const refresh = useCallback(() => deck.current?.open(), []);
@@ -157,14 +158,17 @@ export function useDeck(link: Link | null): DeckState {
         if (msg.type === 'sessions') setSessions(msg.sessions);
         else if (msg.type === 'external') setExternal(msg.sessions);
         else if (msg.type === 'snapshot') {
-          setScreens((prev) => ({ ...prev, [msg.id]: msg.data }));
+          // text は画面の文字がそのまま入っている（桁を知っているサーバーが組む）。
+          // data しか来ない相手のときだけ、こちらで ANSI を剥がす。
+          const screen = typeof msg.text === 'string' ? msg.text : toPlain(msg.data ?? '');
+          setScreens((prev) => ({ ...prev, [msg.id]: screen }));
         }
       },
       (isUp) => {
         setUp(isUp);
         // 繋ぎ直したら、見ていたセッションに戻る
         if (isUp && watching.current) {
-          instance.send({ type: 'attach', id: watching.current, mode: 'snapshot' });
+          instance.send({ type: 'attach', id: watching.current, mode: 'text' });
         }
       },
     );

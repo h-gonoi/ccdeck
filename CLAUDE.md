@@ -127,6 +127,14 @@ named import が使えない。`import xtermHeadless from '@xterm/headless'` し
 記録は `~/.ccdeck/audit.log`。**打鍵の中身は残さない**（パスワードが混ざる）。
 セッションごとに「触り始めた」ことだけ一度書く。
 
+### 色の要らない相手に ANSI を送らない
+
+スマホの読み取り画面（M1）は色を出さない。そこへ ANSI を送って受け手で装飾を剥がすと、
+**カーソル移動で作られた横の間隔まで消える**（`Claude Code   v2.1.231` が
+`Claude Codev2.1.231` になる）。桁を知っていて正しく組めるのは判定用の
+headless xterm を持つサーバー側だけなので、`attach { mode: 'text' }` には
+`screenText()` の結果を送る。受け手で剥がす実装に戻さないこと。
+
 ### 同じ場所を綴り違いで二重に数えない
 
 macOS のファイルシステムは大文字小文字を区別しない。`~/projects` と `~/Projects` は

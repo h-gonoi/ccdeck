@@ -321,13 +321,19 @@ wss.on('connection', (ws) => {
         // 復帰のたびに 512KB を流せない相手は snapshot を頼む。
         // その相手には以降も生の出力ではなく、間引いた画面だけを送る
         // （生を流すなら snapshot にした意味がない）。
-        const shot = () => ({
-          type: 'snapshot', id: msg.id, data: session.snapshot(),
-          cols: session.cols, rows: session.rows,
-        });
+        //
+        //   snapshot … 色や飾りごと ANSI で。xterm.js に食わせる相手向け
+        //   text     … 画面の文字だけ。色を出さない相手向け
+        //
+        // ANSI を送って向こうで剥がすと、カーソル移動で作られた横の間隔が消えて
+        // 「Claude Codev2.1.231」のように詰まる。桁を正しく知っているのはこちら側
+        // なので、素のテキストが要る相手にはこちらで組んでから渡す。
+        const shot = () => (msg.mode === 'text'
+          ? { type: 'snapshot', id: msg.id, text: session.screenText(), cols: session.cols, rows: session.rows }
+          : { type: 'snapshot', id: msg.id, data: session.snapshot(), cols: session.cols, rows: session.rows });
 
         let pump;
-        if (msg.mode === 'snapshot') {
+        if (msg.mode === 'snapshot' || msg.mode === 'text') {
           send(shot());
           let timer = null;
           pump = () => {

@@ -1,24 +1,23 @@
 import { useEffect } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { toPlain } from '../ansi';
 import { C, MONO, relTime, stateColor, STATE_LABEL } from '../theme';
 import type { Session } from '../types';
 
 type Props = {
   session: Session;
-  ansi: string | undefined;
+  screen: string | undefined;
   onWatch: (id: string | null) => void;
   onBack: () => void;
 };
 
 // M1 は「読む」ところまで。打つのは M2（xterm.js を WebView に積む）。
-export default function Screen({ session, ansi, onWatch, onBack }: Props) {
+export default function Screen({ session, screen, onWatch, onBack }: Props) {
   useEffect(() => {
     onWatch(session.id);
     return () => onWatch(null);
   }, [session.id]);
 
-  const text = ansi ? toPlain(ansi) : '';
+  const text = (screen ?? '').replace(/\s+$/, '');
 
   return (
     <View style={s.fill}>
@@ -43,7 +42,7 @@ export default function Screen({ session, ansi, onWatch, onBack }: Props) {
         {/* 桁数はあちら（PC）のまま。畳まずに横へ流して読む。 */}
         <ScrollView horizontal showsHorizontalScrollIndicator>
           <Text style={s.screen} selectable>
-            {text || (ansi === undefined ? '画面を受け取っています…' : '（まだ何も描かれていません）')}
+            {text || (screen === undefined ? '画面を受け取っています…' : '（まだ何も描かれていません）')}
           </Text>
         </ScrollView>
       </ScrollView>
