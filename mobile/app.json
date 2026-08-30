@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "ccdeck",
+    "slug": "ccdeck",
+    "version": "0.1.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#131311",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "dev.ccdeck.mobile"
+    },
+    "android": {
+      "package": "dev.ccdeck.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#131311",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": { "favicon": "./assets/favicon.png" }
+  }
+}

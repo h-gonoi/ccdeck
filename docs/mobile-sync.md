@@ -1,6 +1,6 @@
 # ccdeck mobile — 仕様
 
-PC で走っている Claude Code セッションを、同じ Wi-Fi にいるスマホから見て、打てるようにする。
+PC で走っている Claude Code / Codex セッションを、同じ Wi-Fi にいるスマホから見て、打てるようにする。
 
 ccdeck の値打ちは「**手が空いたセッションに気づける**」ことにある。スマホ側もそこを主役にする。
 一覧と通知が先、ターミナルは後。**軽さが最優先**という母体の方針は、こちらにも効かせる。
@@ -13,7 +13,10 @@ ccdeck の値打ちは「**手が空いたセッションに気づける**」こ
 | PC 画面のペアリング（コード発行・端末一覧） | **実装済み** |
 | スナップショット（`attach { mode:'snapshot' }`） | **実装済み** |
 | 画面サイズの所有権（`claimSize` / `releaseSize`） | **実装済み** |
-| スマホアプリ（`mobile/`） | 未着手 |
+| スマホアプリ M1（ペアリング・一覧・snapshot の読み取り） | **実装済み** |
+| スマホからのキー入力・サイズ所有権の操作 | M2（未実装） |
+| push 通知 | M3（未実装） |
+| TLS と証明書ピン留め | M4（未実装） |
 
 ## これは何ではないか
 
@@ -40,8 +43,8 @@ ccdeck の値打ちは「**手が空いたセッションに気づける**」こ
   ┌────────────────┐                    ┌──────────────────────────┐
   │ Expo アプリ     │                    │ ccdeck server            │
   │  一覧・状態     │◀── WS /ws ────────▶│  SessionManager → PTY    │
-  │  ターミナル     │    REST /api       │  headless xterm（判定）  │
-  │  （WebView）    │                    │  auth / devices          │
+  │  M1: 画面を読む │    REST /api       │  headless xterm（判定）  │
+  │  M2: 入力       │                    │  auth / devices          │
   └────────────────┘   同じ LAN だけ     └──────────────────────────┘
           ▲                                          │
           │                                          │ outbound
@@ -59,7 +62,7 @@ ccdeck の値打ちは「**手が空いたセッションに気づける**」こ
 
 ```sh
 ccdeck start            # 127.0.0.1:7788（今まで通り）
-ccdeck start --lan      # 0.0.0.0:7788 + トークン必須 + 起動時に QR を出す
+ccdeck start --lan      # 0.0.0.0:7788 + トークン必須
 ```
 
 `--lan` を付けた起動では、ターミナルに待ち受けアドレスと警告を出す。何が起きているかを黙らせない。
@@ -97,8 +100,8 @@ PC 画面の左下「スマホ」に、待ち受けアドレスと 6 桁コー�
 > 「6 桁とアドレスを一度打つ」手間に見合わないため。入れるときは
 > `editor.js` と同じく、ペアリング画面を開いたときだけ動的 import する。
 
-DHCP でアドレスが変わる問題は、`/api/health` が返す `hostname`（`*.local`）で逃げる。
-アプリは **hostname → 最後に繋がった IP** の順に試す。
+`/api/health` は `hostname` も返す。M1 は入力した IP アドレスを SecureStore に保存する。
+DHCP 変更時の **hostname → 最後に繋がった IP** のフォールバックは今後の課題。
 
 ---
 
@@ -130,7 +133,7 @@ DHCP でアドレスが変わる問題は、`/api/health` が返す `hostname`�
 |---|---|---|
 | ← | `hello` | `buildId`。版が変わっていたら画面は自力でリロードする |
 | ← | `sessions` / `external` | 一覧まるごと |
-| ← | `replay` / `output` | 出力 |
+| ← | `replay` / `output` | PC 向けの生出力 |
 | → | `attach` / `detach` / `input` / `resize` / `read` | |
 
 ### WebSocket（追加）
@@ -144,7 +147,8 @@ DHCP でアドレスが変わる問題は、`/api/health` が返す `hostname`�
 | ← | `sizeOwner` | `{ id, mine: bool, cols, rows }` 持ち主が変わったとき |
 | ↔ | `ping` / `pong` | アプリ層の生存確認（20 秒ごと、10 秒無応答で張り直す） |
 
-セッションの JSON に `cols` / `rows` / `sizeOwner` を足す。
+セッションの JSON には `cols` / `rows` が入る。所有権は接続ごとに異なるため、
+セッション JSON ではなく `sizeOwner` イベントで知らせる。
 
 ---
 
@@ -189,8 +193,9 @@ iOS はバックグラウンドで WebSocket を切る。**復帰のたびに 51
 | PC（既存） | `replay` | 生出力 512KB（今まで通り。既定を変えない） |
 | スマホ | `snapshot` | 今の画面だけ |
 
-復帰の手順は **WS 張り直し → `attach { mode:'snapshot' }` → あとは `output` の差分**。
-切れている間の出力は追わない。スナップショットで足りる。
+復帰の手順は **WS 張り直し → `attach { mode:'snapshot' }`**。
+snapshot mode の購読者には生の `output` を流さず、出力があったときに最大 2 回/秒へ間引いた
+新しい snapshot を送る。切れている間の出力は追わない。現在画面だけで追いつく。
 
 > スクロールバックはこの方式では見られない。必要になったら別途 `history` を足す（未決）。
 
@@ -221,7 +226,12 @@ ccdeck                          ⟳
 - 引っ張って更新。ただし WS が繋がっていれば自動で来る。
 - カードで囲まない。区切りは余白と線。角丸 3px。母体のデザインの決めごとをそのまま使う。
 
-### ターミナル
+### 現在画面（M1）
+
+M1 は snapshot の ANSI 装飾を落とし、等幅のプレーンテキストとして縦横にスクロールして読む。
+トークンや WebSocket は React Native 側だけが持つ。キー入力はまだ送らない。
+
+### ターミナル（M2）
 
 WebView に xterm.js を積む。**WebSocket は React Native 側が持ち、WebView は描画専用**にする。
 
@@ -269,7 +279,7 @@ xterm.js と CSS は HTML に**インラインで埋める**。CDN を引かな�
 
 ---
 
-## 6. 通知
+## 6. 通知（M3）
 
 「気づける」がこのアプリの主目的。ここを外すと作る意味がない。
 
@@ -294,9 +304,9 @@ ccdeck は PTY を作れる。**素で LAN に出すことは、その Wi-Fi に
 
 | 守り | 中身 |
 |---|---|
-| 既定は閉じたまま | `--lan` を明示しない限り `127.0.0.1`。起動時に警告と QR を出す |
-| コマンドを固定 | **LAN からの `POST /api/sessions` は `command` を無視し `claude` 固定。** ここを緩めると LAN 越しの任意コマンド実行になる |
-| 全 API にトークン | git も files も同じ扱い。`--remote-read-only` で LAN からの書き込み（commit / push / ファイル保存）を落とせる |
+| 既定は閉じたまま | `--lan` を明示しない限り `127.0.0.1`。LAN 起動時はアドレスと警告を出す |
+| コマンドを固定 | `POST /api/sessions` は `command` を受けず、`agent` を `claude` / `codex` の固定コマンドへ変換する |
+| 全 API にトークン | git も files も同じ扱い。M1 アプリは読み取りだけだが、サーバーの認可境界は共通 |
 | 端末ごとの鍵 | 失効は 1 台ずつ。共有パスワードにしない |
 | 記録 | LAN からのセッション作成・kill・入力の開始を `~/.ccdeck/audit.log` に 1 行ずつ |
 
@@ -310,43 +320,43 @@ ccdeck は PTY を作れる。**素で LAN に出すことは、その Wi-Fi に
 
 ## 8. モバイル側の構成
 
+現在の M1 は次の構成。
+
 ```
 mobile/
-  app.json / eas.json
+  app.json
   App.tsx
   src/
-    api.ts              REST クライアント（トークンを載せる）
-    ws.ts               WebSocket・再接続・ハートビート
-    pairing.ts          QR 読み取りとトークン保管
-    push.ts             Expo Push の登録
-    store.ts            セッション一覧の状態
+    api.ts              REST クライアント
+    deck.ts             WebSocket・再接続・ハートビート・状態管理
+    store.ts            接続先とトークンの SecureStore
+    ansi.ts             snapshot を読み取り用テキストへ変換
     screens/
       Sessions.tsx      一覧
-      Terminal.tsx      ターミナル（WebView を包む）
+      Screen.tsx        現在画面（読み取り専用）
       Pair.tsx          ペアリング
-      Settings.tsx      接続先・通知・端末情報
-    terminal/
-      index.html        xterm.js を埋め込んだ単一 HTML
-      bridge.ts         postMessage の型
+      Settings.tsx      接続先・端末登録の解除
 ```
+
+M2 で WebView + xterm.js、M3 で通知のファイルと依存を加える。
 
 | 依存 | 用途 |
 |---|---|
 | `expo-secure-store` | トークン |
-| `expo-camera` | QR |
-| `expo-notifications` | push |
-| `react-native-webview` | xterm.js の器 |
+| `expo-camera` | QR（将来） |
+| `expo-notifications` | push（M3） |
+| `react-native-webview` | xterm.js の器（M2） |
 
 ### サーバー側で触るところ
 
 | ファイル | 変更 |
 |---|---|
 | `server/auth.js`（新規） | トークン発行・検証、端末台帳、ペアリングコード |
-| `server/push.js`（新規） | Expo Push への送信とレート制限 |
+| `server/push.js`（M3 で新規） | Expo Push への送信とレート制限 |
 | `server/index.js` | バインド先、認証、追加エンドポイント、サイズ所有権 |
 | `server/sessions.js` | `snapshot()`、`toJSON` に `cols` / `rows` / `sizeOwner` |
 | `bin/ccdeck` | `--lan` と起動時の QR |
-| `web/` | ペアリングの QR、端末一覧、サイズを誰が持っているかの表示 |
+| `web/` | ペアリングコード、端末一覧、サイズを誰が持っているかの表示 |
 
 ---
 
@@ -354,7 +364,7 @@ mobile/
 
 | | 目標 | 終わりの合図 |
 |---|---|---|
-| **M1 読める** | 一覧・状態・スナップショット表示 | スマホで「どれが自分の番か」が判る |
+| **M1 読める（完了）** | 一覧・状態・スナップショット表示 | スマホで「どれが自分の番か」が判る |
 | **M2 打てる** | 入力・キーバー・サイズ所有権・承認の近道 | スマホから承認して先へ進められる |
 | **M3 気づける** | Expo Push | 画面を見ていなくても呼ばれる |
 | **M4 守る** | TLS + ピン留め、端末失効 UI、監査ログ | 信頼しきれない LAN でも使える |

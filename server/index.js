@@ -231,6 +231,7 @@ setInterval(() => pushExternal(), 3000);    // watch の取りこぼし対策
 // 両方が resize を送れば奪い合いになり、TUI は描き直すたびに崩れる。
 // だから持ち主をひとりに限り、それ以外の resize は黙って捨てる。
 // （叱らないのは、画面を回すたびにエラーを返しても仕方がないため）
+const SNAPSHOT_MS = 500;     // snapshot で見ている相手に送る最短間隔
 const owners = new Map();    // sessionId -> ws
 const viewers = new Map();   // sessionId -> Set<ws>
 
@@ -290,6 +291,7 @@ wss.on('connection', (ws) => {
     const session = manager.get(id);
     const pump = pumps.get(id);
     if (session && pump) session.off('data', pump);
+    pump?.stop?.();
     pumps.delete(id);
     attached.delete(id);
     dropViewer(id, ws);
@@ -306,17 +308,28 @@ wss.on('connection', (ws) => {
         attached.add(msg.id);
         viewersOf(msg.id).add(ws);
 
-        // 復帰のたびに 512KB を流せない相手は snapshot を頼む
+        // 復帰のたびに 512KB を流せない相手は snapshot を頼む。
+        // その相手には以降も生の出力ではなく、間引いた画面だけを送る
+        // （生を流すなら snapshot にした意味がない）。
+        const shot = () => ({
+          type: 'snapshot', id: msg.id, data: session.snapshot(),
+          cols: session.cols, rows: session.rows,
+        });
+
+        let pump;
         if (msg.mode === 'snapshot') {
-          send({
-            type: 'snapshot', id: msg.id, data: session.snapshot(),
-            cols: session.cols, rows: session.rows,
-          });
+          send(shot());
+          let timer = null;
+          pump = () => {
+            if (timer) return;
+            timer = setTimeout(() => { timer = null; send(shot()); }, SNAPSHOT_MS);
+          };
+          pump.stop = () => clearTimeout(timer);
         } else {
           send({ type: 'replay', id: msg.id, data: session.getReplay() });
+          pump = (data) => send({ type: 'output', id: msg.id, data });
         }
 
-        const pump = (data) => send({ type: 'output', id: msg.id, data });
         pumps.set(msg.id, pump);
         session.on('data', pump);
         session.markRead();
@@ -359,6 +372,8 @@ wss.on('connection', (ws) => {
         break;
       }
       case 'read': session?.markRead(); break;
+      // 繋がったつもりのまま黙る状態を、相手が断ち切れるようにする
+      case 'ping': send({ type: 'pong' }); break;
     }
   });
 

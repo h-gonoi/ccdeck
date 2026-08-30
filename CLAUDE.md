@@ -43,6 +43,9 @@ web/
   editor.js    CodeMirror。開いたときだけ動的 import する
 menubar/
   main.swift   NSStatusItem の常駐アプリ
+mobile/
+  src/deck.ts  React Native 側の WebSocket・再接続・snapshot 購読
+  src/screens/ M1 のペアリング・一覧・読み取り画面・設定
 ```
 
 ## 踏んだ落とし穴（同じ穴を掘り直さないこと）

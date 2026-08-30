@@ -175,7 +175,11 @@ web/
   term.js      xterm.js の管理
   editor.js    CodeMirror（開いたときだけ読み込む）
 docs/
-  mobile-sync.md  スマホから見て打つための仕様（未実装）
+  mobile-sync.md  スマホ同期の仕様と段階
+mobile/
+  App.tsx       Expo アプリの入口
+  src/deck.ts   WebSocket・再接続・状態管理
+  src/screens/  ペアリング・一覧・画面・設定
 ```
 
 ### 状態判定の仕組み
@@ -219,18 +223,25 @@ npm run build     # web/ をビルド
 npm start         # サーバーを直接起動
 ```
 
-## スマホから見る（作りかけ）
+## スマホから見る（M1）
 
-同じ Wi-Fi にいるスマホから、走っているセッションを見て打てるようにする計画。
-仕様は [docs/mobile-sync.md](docs/mobile-sync.md)。**スマホアプリはまだない。**
-いまあるのは、その土台にあたるサーバー側の受け口だけ。
+`mobile/` に Expo 製の iOS / Android アプリがある。同じ Wi-Fi にいるスマホから
+セッション一覧と状態を同期し、ccdeck が持つセッションの現在画面を読める。
+現段階は **M1（読むだけ）**。キー入力・push 通知・TLS は未実装で、今後の段階と判断は
+[docs/mobile-sync.md](docs/mobile-sync.md) にまとめている。
 
 ```sh
 ccdeck start --lan     # LAN に出す（付けなければ 127.0.0.1 のまま）
+cd mobile
+npm install
+npm start              # Expo の開発サーバー
 ```
 
 `--lan` を付けたときだけ、左のサイドバーに「スマホ」の節が出る。
-そこで 6 桁のコードを発行し、端末側で待ち受けアドレスと一緒に打ち込むと登録される。
+そこで 6 桁のコードを発行し、アプリへ待ち受けアドレスと一緒に打ち込むと登録される。
+登録トークンは端末の SecureStore に保存され、一覧は WebSocket で自動更新される。
+画面を開いている間は 500ms 以上の間隔で現在画面の snapshot だけを受け取り、
+バックグラウンドから戻った場合も 512KB の replay を送り直さない。
 
 | | |
 |---|---|
