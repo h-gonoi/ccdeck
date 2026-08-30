@@ -6,6 +6,7 @@ const $ = (id) => document.getElementById(id);
 const STATE_LABEL = {
   starting: '起動中', running: '実行中', attention: '要対応', idle: '待機', exited: '終了',
 };
+const AGENT_LABEL = { claude: 'Claude Code', codex: 'Codex' };
 
 const state = {
   sessions: [],
@@ -23,10 +24,11 @@ const state = {
   devices: [],
   pairCode: null,        // { code, expiresAt } 出している間だけ
   confirmRevoke: null,   // 失効確認を出している端末
+  handoffBusy: false,
 };
 
 // ＋ から出すプロジェクト選び。開いている間だけ使う状態。
-const picker = { open: false, query: '', index: 0, items: [] };
+const picker = { open: false, query: '', index: 0, items: [], agent: 'claude' };
 
 // ---------- WebSocket ----------
 let ws = null;
@@ -54,6 +56,7 @@ function connect() {
   ws.onclose = () => setTimeout(connect, 1200); // サーバー再起動に自力で追従する
 }
 const send = (payload) => ws?.readyState === 1 && ws.send(JSON.stringify(payload));
+
 
 // サイズの持ち主が変わったとき。奪われた側は黙って縮まると訳が分からないので伝える。
 const owned = new Map();
@@ -205,11 +208,11 @@ function updateBadge() {
   document.title = waiting ? `(${waiting}) ccdeck` : unread ? `• ccdeck` : 'ccdeck';
 }
 
-async function openSession(cwd, title) {
+async function openSession(cwd, title, agent = 'claude') {
   // 通知はセッションを立てる操作のついでに一度だけ求める（初回クリックを奪わない）
   if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
   const { cols, rows } = pool.size(state.activeId);
-  const session = await api.createSession({ cwd, title, cols, rows });
+  const session = await api.createSession({ cwd, title, agent, cols, rows });
   markRecent(cwd);
   // 並べている最中なら、そこに足す方が自然
   if (state.panes.length > 1 && state.panes.length < 12) {
@@ -218,6 +221,26 @@ async function openSession(cwd, title) {
     setActive(session.id);
   } else {
     selectSession(session.id);
+  }
+}
+
+async function switchAgent(agent) {
+  const source = state.sessions.find((s) => s.id === state.activeId);
+  if (!source || source.agent === agent || state.handoffBusy) return;
+  state.handoffBusy = true;
+  renderStage();
+  try {
+    const target = await api.handoffSession(source.id, agent);
+    if (!state.sessions.some((s) => s.id === target.id)) {
+      state.sessions = [...state.sessions, target];
+    }
+    selectSession(target.id);
+    toast(`${AGENT_LABEL[agent]} に引き継ぎました`);
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    state.handoffBusy = false;
+    renderStage();
   }
 }
 
@@ -378,6 +401,9 @@ function renderSessions() {
     label.className = `session__state--${s.status}`;
     label.textContent = STATE_LABEL[s.status] ?? s.status;
     meta.append(label, Object.assign(document.createElement('span'), { textContent: '·' }),
+      Object.assign(document.createElement('span'), {
+        className: 'session__agent', textContent: AGENT_LABEL[s.agent] ?? AGENT_LABEL.claude,
+      }), Object.assign(document.createElement('span'), { textContent: '·' }),
       Object.assign(document.createElement('span'), { textContent: relTime(s.lastActivity) }));
 
     li.append(top, meta);
@@ -626,6 +652,7 @@ function openPicker() {
   closeContext();
   picker.open = true;
   picker.query = '';
+  picker.agent = 'claude';
   // いま打っているセッションの場所を最初に当てておく（⌘N → Enter で「もう1本」）
   const active = state.sessions.find((s) => s.id === state.activeId);
   picker.index = Math.max(0, state.projects.findIndex((p) => p.path === active?.cwd));
@@ -633,6 +660,7 @@ function openPicker() {
   const input = $('picker-input');
   input.value = '';
   $('picker').hidden = false;
+  renderPickerAgent();
   renderPicker();
   placePicker();
   input.focus();
@@ -664,6 +692,22 @@ function pickerMatches() {
   );
 }
 
+function renderPickerAgent() {
+  for (const agent of ['claude', 'codex']) {
+    const button = $(`picker-agent-${agent}`);
+    const selected = picker.agent === agent;
+    button.classList.toggle('picker__agent--on', selected);
+    button.setAttribute('aria-checked', String(selected));
+  }
+}
+
+function selectPickerAgent(agent) {
+  picker.agent = agent;
+  renderPickerAgent();
+  renderPicker();
+  $('picker-input').focus();
+}
+
 function renderPicker() {
   picker.items = pickerMatches();
   picker.index = Math.min(Math.max(picker.index, 0), Math.max(picker.items.length - 1, 0));
@@ -691,7 +735,9 @@ function renderPicker() {
     name.textContent = p.name;
     li.appendChild(name);
 
-    const live = state.sessions.filter((s) => s.cwd === p.path).length;
+    const live = state.sessions.filter(
+      (s) => s.cwd === p.path && (s.agent ?? 'claude') === picker.agent,
+    ).length;
     if (live) {
       li.appendChild(Object.assign(document.createElement('span'), {
         className: 'picker__live', textContent: `${live}本`,
@@ -708,8 +754,9 @@ function renderPicker() {
 
 function choose(project) {
   if (!project) return;
+  const agent = picker.agent;
   closePicker();
-  openSession(project.path, project.name);
+  openSession(project.path, project.name, agent);
 }
 
 // ---------- スマホを繋ぐ ----------
@@ -825,6 +872,16 @@ function renderStage() {
   $('welcome').hidden = state.panes.length > 0;
   $('terms').hidden = state.panes.length === 0;
   $('btn-tile').textContent = tiled ? '1つに戻す' : '並べる';
+  for (const agent of ['claude', 'codex']) {
+    const button = $(`stage-agent-${agent}`);
+    const selected = (session?.agent ?? 'claude') === agent;
+    button.classList.toggle('stage__agent--on', selected);
+    button.setAttribute('aria-pressed', String(selected));
+    button.disabled = state.handoffBusy || selected;
+    button.title = selected
+      ? `${AGENT_LABEL[agent]} で実行中`
+      : `${AGENT_LABEL[agent]} にコンテキストを引き継ぐ`;
+  }
   if (!session) return;
   $('stage-dot').className = `stage__dot stage__dot--${session.status}`;
   $('stage-name').textContent = tiled ? `${state.panes.length} 枠を表示中` : session.title;
@@ -969,6 +1026,8 @@ function toast(text) {
 
 // ---------- イベント ----------
 $('btn-new').onclick = () => (picker.open ? closePicker() : openPicker());
+$('picker-agent-claude').onclick = () => selectPickerAgent('claude');
+$('picker-agent-codex').onclick = () => selectPickerAgent('codex');
 
 $('picker-input').oninput = (event) => {
   picker.query = event.target.value;
@@ -1001,6 +1060,8 @@ $('btn-rescan').onclick = async () => {
 $('btn-pair').onclick = () => togglePairCode();
 $('btn-rail').onclick = () => toggleRail();
 $('btn-tile').onclick = () => tileAll();
+$('stage-agent-claude').onclick = () => switchAgent('claude');
+$('stage-agent-codex').onclick = () => switchAgent('codex');
 
 document.addEventListener('click', (event) => {
   if (!event.target.closest('.ctx')) closeContext();

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "複数の Claude Code セッションを束ねる軽量デッキ",
+  "description": "複数の Claude Code / Codex セッションを束ねる軽量デッキ",
   "license": "MIT",
   "repository": {
     "type": "git",

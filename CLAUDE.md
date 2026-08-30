@@ -1,6 +1,6 @@
 # ccdeck
 
-複数の Claude Code セッションを一画面で束ねるツール。
+複数の Claude Code / Codex セッションを一画面で束ねるツール。
 Cursor を複数ウィンドウ開くのが重いという動機で作った。**軽さが最優先の価値**なので、
 機能を足すときは常駐コストとの釣り合いを見ること。参考値は README の実測表にある。
 
@@ -82,6 +82,12 @@ TUI の枠が崩れる。`syncPanes()` は **setVisible（fit して resize 送�
 
 named import が使えない。`import xtermHeadless from '@xterm/headless'` してから分解する。
 
+### メニューバー起動時の Node をターミナルと揃える
+
+メニューバーアプリの login shell は Homebrew の Node を拾うことがあり、ターミナルで npm install した
+`node-pty` と ABI が食い違う。`bin/ccdeck` は `~/.nvm/alias/default` の Node を優先している。
+ここを単なる `node server/index.js` に戻すと、メニューバーからだけ `ERR_DLOPEN_FAILED` になる。
+
 ### LAN に出すときの関所を素通ししない
 
 `--lan` を付けると PTY を作れる口が LAN に開く。**ここを緩めると、
@@ -89,8 +95,8 @@ named import が使えない。`import xtermHeadless from '@xterm/headless'` し
 
 - **ループバックは素通し、それ以外はトークン。** 判定は `auth.identify()` 一か所。
   `X-Forwarded-For` の類は見ない（詐称できる）
-- **LAN からの `POST /api/sessions` は `command` を捨てて `claude` 固定。**
-  ここを「便利だから」と通すと LAN 越しの任意コマンド実行になる
+- **`POST /api/sessions` は `command` を受けず、`agent` を固定コマンドへ変換する。**
+  ここを「便利だから」と緩めると LAN 越しの任意コマンド実行になる
 - WebSocket は `server.on('upgrade')` で**通す前に**確かめる。
   `verifyClient` を使わないのは、断るときに 401 を返したいため
 - `devices.json` に平文のトークンを書かない。持つのは SHA-256 だけ
@@ -144,6 +150,14 @@ Cursor の内蔵ターミナルは AppleScript で触れないので、そこは
 - 角丸は 3px で統一
 - モーダルは出さない。確認は行の中かメニューの中で二段階にする
 
+## Agent の引き継ぎ
+
+チャット上部の agent ボタンは、同じ `familyId` の Claude Code / Codex セッションを切り替える。
+相手がまだなければ、元セッションのローカル transcript を共通テキストへ変換して初回プロンプトに添え、
+同じ cwd で立ち上げる。transcript を特定・解析できない場合だけ現在画面へフォールバックする。
+ベンダー固有のセッション状態そのものではなく、「変換 transcript＋ファイル・git 状態」の引き継ぎである。
+HTTP からプロンプトやコマンドを受け取らず、サーバー内で組み立てる前提を崩さないこと。
+
 ## 変更時に確認すること
 
 セッションまわりを触ったら、最低限これを見る。
@@ -157,5 +171,5 @@ Cursor の内蔵ターミナルは AppleScript で触れないので、そこは
 
 5. `--lan` なしの起動で、LAN のアドレスから一切繋がらないこと
 6. トークンなしの LAN からの REST と WebSocket が 401 で落ちること
-7. LAN から `command` を指定しても `claude` 以外が起動しないこと
+7. LAN から未対応の `agent` や `command` を指定しても任意コマンドが起動しないこと
 8. 失効させたトークンが、その場で 401 になること

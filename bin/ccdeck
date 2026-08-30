@@ -1,5 +1,5 @@
 #!/bin/zsh
-# ccdeck — 複数の Claude Code セッションを束ねる軽量デッキ
+# ccdeck — 複数の Claude Code / Codex セッションを束ねる軽量デッキ
 set -e
 
 ROOT="${0:A:h:h}"
@@ -9,6 +9,16 @@ STATE_DIR="$HOME/.ccdeck"
 LOG="$STATE_DIR/server.log"
 PID_FILE="$STATE_DIR/server.pid"
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+# メニューバーから起動した login shell は、普段のターミナルと別の Node を拾うことがある。
+# native addon（node-pty）を npm install した Node と揃えるため、NVM の default を優先する。
+NODE_BIN="${CCDECK_NODE:-}"
+if [[ -z "$NODE_BIN" && -f "$HOME/.nvm/alias/default" ]]; then
+  NODE_VERSION="$(<"$HOME/.nvm/alias/default")"
+  NVM_NODE="$HOME/.nvm/versions/node/v${NODE_VERSION}/bin/node"
+  [[ -x "$NVM_NODE" ]] && NODE_BIN="$NVM_NODE"
+fi
+[[ -n "$NODE_BIN" ]] || NODE_BIN="$(command -v node)"
 
 mkdir -p "$STATE_DIR"
 
@@ -25,7 +35,7 @@ alive() { curl -sf -o /dev/null --max-time 1 "$URL/api/sessions"; }
 start_server() {
   if alive; then return 0; fi
   # セッションを孫プロセスとして生かすため、親シェルから完全に切り離す
-  (cd "$ROOT" && nohup node server/index.js $SERVER_ARGS >>"$LOG" 2>&1 & echo $! >"$PID_FILE")
+  (cd "$ROOT" && nohup "$NODE_BIN" server/index.js $SERVER_ARGS >>"$LOG" 2>&1 & echo $! >"$PID_FILE")
   for _ in {1..40}; do
     alive && return 0
     sleep 0.25

@@ -55,6 +55,10 @@
         <span class="stage__path" id="stage-path"></span>
       </div>
       <div class="stage__actions" id="stage-actions" hidden>
+        <div class="stage__agents" id="stage-agents" role="group" aria-label="Agent を切り替える">
+          <button class="stage__agent" id="stage-agent-claude" type="button">Claude Code</button>
+          <button class="stage__agent" id="stage-agent-codex" type="button">Codex</button>
+        </div>
         <button class="ghost-btn" id="btn-tile" title="走っているセッションを並べる (⌘E)">並べる</button>
         <button class="ghost-btn" id="btn-git">変更 <span class="pill" id="change-count">0</span></button>
         <button class="ghost-btn ghost-btn--danger" id="btn-kill">終了</button>
@@ -65,7 +69,7 @@
 
     <div class="welcome" id="welcome">
       <p class="welcome__lead">まだ何も走っていません。</p>
-      <p class="welcome__sub">左のプロジェクトをクリックすると、そこで <code>claude</code> が立ち上がります。<br />
+      <p class="welcome__sub">左のプロジェクトをクリックすると Claude Code、＋からは Codex も選んで立ち上げられます。<br />
       複数立ち上げても、手が空いたセッションは左のリストが琥珀色で教えます。</p>
     </div>
   </main>
@@ -110,6 +114,13 @@
 
   <!-- ＋ から出るプロジェクト選び。モーダルではなく、外を押せば消える板。 -->
   <div class="picker" id="picker" hidden>
+    <div class="picker__agents" role="radiogroup" aria-label="Agent">
+      <span class="picker__agents-label">Agent</span>
+      <button class="picker__agent picker__agent--on" id="picker-agent-claude"
+              type="button" role="radio" aria-checked="true">Claude Code</button>
+      <button class="picker__agent" id="picker-agent-codex"
+              type="button" role="radio" aria-checked="false">Codex</button>
+    </div>
     <input class="picker__input" id="picker-input" type="text"
            placeholder="プロジェクトを選ぶ" autocomplete="off" spellcheck="false" />
     <ul class="picker__list" id="picker-list"></ul>

@@ -314,6 +314,28 @@ button { font-family: inherit; cursor: pointer; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .stage__actions { display: flex; gap: var(--s-sm); flex: none; }
+.stage__agents {
+  display: flex;
+  padding: 2px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.stage__agent {
+  padding: 4px 7px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  color: var(--faint);
+  font-size: 10.5px;
+}
+.stage__agent:hover:not(:disabled) { color: var(--text); background: var(--raised); }
+.stage__agent--on, .stage__agent--on:disabled {
+  color: var(--text);
+  background: var(--raised);
+  cursor: default;
+  opacity: 1;
+}
 
 /* 分割表示。枠線代わりに 1px の隙間を空け、地の色を透かせる */
 .terms {
@@ -578,6 +600,30 @@ button { font-family: inherit; cursor: pointer; }
   border-radius: var(--radius);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
   overflow: hidden;
+}
+.picker__agents {
+  display: flex; align-items: center; gap: 4px;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.picker__agents-label {
+  margin: 0 auto 0 3px;
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--faint);
+}
+.picker__agent {
+  padding: 4px 7px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--faint);
+  font-size: 11px;
+}
+.picker__agent:hover { color: var(--text); background: var(--panel); }
+.picker__agent--on {
+  color: var(--text);
+  background: var(--panel);
+  border-color: var(--line);
 }
 .picker__input {
   width: 100%;

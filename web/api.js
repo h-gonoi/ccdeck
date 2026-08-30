@@ -16,6 +16,7 @@ export const api = {
   projects: () => request('/api/projects'),
   sessions: () => request('/api/sessions'),
   createSession: (body) => post('/api/sessions', body),
+  handoffSession: (id, agent) => post(`/api/sessions/${id}/handoff`, { agent }),
   killSession: (id) => request(`/api/sessions/${id}`, { method: 'DELETE' }),
 
   gitStatus: (cwd) => request(`/api/git/status?cwd=${encodeURIComponent(cwd)}`),

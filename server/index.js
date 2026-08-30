@@ -5,7 +5,7 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { SessionManager } from './sessions.js';
+import { AGENT_COMMANDS, SessionManager, normalizeAgent } from './sessions.js';
 import * as git from './git.js';
 import * as files from './files.js';
 import { scan, loadConfig, saveConfig, touchRecent } from './projects.js';
@@ -64,6 +64,7 @@ app.get('/api/health', (req, res) => res.json({
   lan: LAN,
   address: LAN ? auth.lanAddress() : '127.0.0.1',
   port: PORT,
+  agents: Object.keys(AGENT_COMMANDS),
   capabilities: ['sessions', 'external', 'git', 'files', 'pair'],
 }));
 
@@ -97,15 +98,20 @@ app.post('/api/config', wrap(async (req, res) => res.json(await saveConfig(req.b
 app.get('/api/sessions', (req, res) => res.json(manager.list()));
 
 app.post('/api/sessions', wrap(async (req, res) => {
-  const { cwd, title, command, cols, rows } = req.body;
+  const { cwd, title, cols, rows, resumeId } = req.body;
   if (!cwd) throw new Error('cwd は必須です');
-  // LAN からの command は受けない。ここを緩めると LAN 越しの任意コマンド実行になる。
-  const session = manager.create({
-    cwd, title, cols, rows, command: req.who.local ? command : undefined,
-  });
+  // command はローカルからも受けない。agent を固定コマンドへ変換して任意実行を防ぐ。
+  const agent = normalizeAgent(req.body.agent);
+  const session = manager.create({ cwd, title, cols, rows, agent, resumeId });
   auth.audit(req.who, 'session.create', cwd);
   // 「最近使った」の記録に失敗しても、セッションそのものは通す
   touchRecent(cwd).catch(() => {});
+  res.json(session.toJSON());
+}));
+
+app.post('/api/sessions/:id/handoff', wrap(async (req, res) => {
+  const session = manager.handoff(req.params.id, req.body?.agent);
+  auth.audit(req.who, 'session.handoff', `${req.params.id}:${session.agent}`);
   res.json(session.toJSON());
 }));
 
@@ -382,6 +388,7 @@ wss.on('connection', (ws) => {
 
 // 台帳を読み終える前に受け付けると、登録済みの端末を弾いてしまう
 await auth.ready;
+
 
 server.listen(PORT, HOST, () => {
   if (!LAN) {
