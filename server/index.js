@@ -226,6 +226,55 @@ try {
 } catch { /* ディレクトリが無い環境では諦める */ }
 setInterval(() => pushExternal(), 3000);    // watch の取りこぼし対策
 
+// ---- 画面サイズの持ち主 ----
+// PTY のサイズはセッションにひとつしかない。PC が 120 桁・スマホが 45 桁で
+// 両方が resize を送れば奪い合いになり、TUI は描き直すたびに崩れる。
+// だから持ち主をひとりに限り、それ以外の resize は黙って捨てる。
+// （叱らないのは、画面を回すたびにエラーを返しても仕方がないため）
+const owners = new Map();    // sessionId -> ws
+const viewers = new Map();   // sessionId -> Set<ws>
+
+const viewersOf = (id) => {
+  if (!viewers.has(id)) viewers.set(id, new Set());
+  return viewers.get(id);
+};
+
+const tell = (client, payload) => {
+  if (client.readyState === 1) client.send(JSON.stringify(payload));
+};
+
+function announceOwner(id) {
+  const session = manager.get(id);
+  const owner = owners.get(id);
+  for (const client of viewersOf(id)) {
+    tell(client, {
+      type: 'sizeOwner', id, mine: client === owner,
+      cols: session?.cols, rows: session?.rows,
+    });
+  }
+}
+
+function setOwner(id, ws) {
+  owners.set(id, ws);
+  announceOwner(id);
+}
+
+// 見るのをやめた人が持ち主なら、残っている誰かへ渡す。誰もいなければ持ち主なし
+// （PTY のサイズは最後の値のまま。次に誰かが resize を送れば、その人が持つ）。
+function dropViewer(id, ws) {
+  viewersOf(id).delete(ws);
+  if (owners.get(id) !== ws) return;
+  const next = [...viewersOf(id)][0];
+  if (next) setOwner(id, next);
+  else owners.delete(id);
+}
+
+// 消えたセッションの持ち主・見物人を片付ける
+manager.on('sessions', () => {
+  for (const id of [...owners.keys()]) if (!manager.get(id)) owners.delete(id);
+  for (const id of [...viewers.keys()]) if (!manager.get(id)) viewers.delete(id);
+});
+
 wss.on('connection', (ws) => {
   // このクライアントが画面に出しているセッション。出力はここに限って流す。
   const attached = new Set();
@@ -243,6 +292,7 @@ wss.on('connection', (ws) => {
     if (session && pump) session.off('data', pump);
     pumps.delete(id);
     attached.delete(id);
+    dropViewer(id, ws);
   };
 
   ws.on('message', (raw) => {
@@ -254,11 +304,25 @@ wss.on('connection', (ws) => {
       case 'attach': {
         if (!session || attached.has(msg.id)) return;
         attached.add(msg.id);
-        send({ type: 'replay', id: msg.id, data: session.getReplay() });
+        viewersOf(msg.id).add(ws);
+
+        // 復帰のたびに 512KB を流せない相手は snapshot を頼む
+        if (msg.mode === 'snapshot') {
+          send({
+            type: 'snapshot', id: msg.id, data: session.snapshot(),
+            cols: session.cols, rows: session.rows,
+          });
+        } else {
+          send({ type: 'replay', id: msg.id, data: session.getReplay() });
+        }
+
         const pump = (data) => send({ type: 'output', id: msg.id, data });
         pumps.set(msg.id, pump);
         session.on('data', pump);
         session.markRead();
+
+        if (!owners.has(msg.id)) setOwner(msg.id, ws);
+        else announceOwner(msg.id);
         break;
       }
       case 'detach': detach(msg.id); break;
@@ -269,7 +333,31 @@ wss.on('connection', (ws) => {
         session.write(msg.data);
         break;
       }
-      case 'resize': session?.resize(msg.cols, msg.rows); break;
+      case 'resize': {
+        if (!session) break;
+        // 誰も持っていなければ、送ってきた人が持つ。
+        // 画面側は「fit して resize → attach」の順で動くので、ここを塞ぐと
+        // 最初の 1 本のサイズが決まらなくなる。
+        if (!owners.has(msg.id)) owners.set(msg.id, ws);
+        if (owners.get(msg.id) !== ws) break;   // 持ち主でなければ黙って捨てる
+        session.resize(msg.cols, msg.rows);
+        break;
+      }
+      case 'claimSize': {
+        if (!session) break;
+        setOwner(msg.id, ws);
+        session.resize(msg.cols, msg.rows);
+        auth.audit(ws.who, 'size.claim', `${session.cwd} ${msg.cols}x${msg.rows}`);
+        break;
+      }
+      case 'releaseSize': {
+        if (!session || owners.get(msg.id) !== ws) break;
+        owners.delete(msg.id);
+        const next = [...viewersOf(msg.id)].find((client) => client !== ws);
+        if (next) setOwner(msg.id, next);
+        else announceOwner(msg.id);
+        break;
+      }
       case 'read': session?.markRead(); break;
     }
   });

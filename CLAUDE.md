@@ -97,6 +97,15 @@ named import が使えない。`import xtermHeadless from '@xterm/headless'` し
 記録は `~/.ccdeck/audit.log`。**打鍵の中身は残さない**（パスワードが混ざる）。
 セッションごとに「触り始めた」ことだけ一度書く。
 
+### 同じ場所を綴り違いで二重に数えない
+
+macOS のファイルシステムは大文字小文字を区別しない。`~/projects` と `~/Projects` は
+同じ場所なのに文字列としては別物で、**`realpath` も綴りを直してくれない**。
+「最近使った」は cwd をそのまま記録するので、綴りが違うと**一覧に同じリポジトリが二つ並ぶ**。
+
+`server/projects.js` の同一判定は `nodeKey()`（`dev:ino`）で行っている。
+パスの文字列比較に戻さないこと。
+
 ### プロジェクトの並びは二か所にある
 
 「ピン → 最近使った順 → 名前」という順は `server/projects.js` の `compareProjects` と

@@ -40,24 +40,50 @@ export async function saveConfig(config) {
   return config;
 }
 
+// macOS のファイルシステムは大文字小文字を区別しない。
+// /Users/x/projects と /Users/x/Projects は同じ場所なのに文字列としては別物で、
+// realpath も綴りを直してくれない。だから同一判定は inode で行う。
+// （これを怠ると、同じリポジトリが一覧に二つ並ぶ）
+async function nodeKey(dir) {
+  try {
+    const stat = await fs.stat(dir);
+    return `${stat.dev}:${stat.ino}`;
+  } catch {
+    return null;   // 消えた場所
+  }
+}
+
+// 同じ場所を指す綴り違いをまとめ、消えた場所は落とす
+async function dedupe(entries) {
+  const seen = new Map();
+  for (const [dir, at] of Object.entries(entries)) {
+    if (typeof at !== 'number') continue;
+    const key = await nodeKey(dir);
+    if (!key) continue;
+    const prev = seen.get(key);
+    if (!prev || at > prev.at) seen.set(key, { dir, at });
+  }
+  return Object.fromEntries([...seen.values()].map(({ dir, at }) => [dir, at]));
+}
+
 // 書いているのはこのプロセスだけなので、読み直さずメモリの写しを正とする。
 let recentCache = null;
 
 export async function loadRecent() {
   if (recentCache) return recentCache;
+  let raw = {};
   try {
-    const raw = JSON.parse(await fs.readFile(RECENT_PATH, 'utf8'));
-    recentCache = raw && typeof raw === 'object' ? raw : {};
-  } catch {
-    recentCache = {};
-  }
+    const parsed = JSON.parse(await fs.readFile(RECENT_PATH, 'utf8'));
+    if (parsed && typeof parsed === 'object') raw = parsed;
+  } catch { /* 無ければ空から始める */ }
+  recentCache = await dedupe(raw);
   return recentCache;
 }
 
 // セッションを立てたときに呼ぶ。ここが「最近使った」の唯一の入口。
 export async function touchRecent(dir, at = Date.now()) {
   if (!dir) return {};
-  const merged = { ...(await loadRecent()), [dir]: at };
+  const merged = await dedupe({ ...(await loadRecent()), [dir]: at });
   // 際限なく増やさない。古いものから落とす。
   recentCache = Object.fromEntries(
     Object.entries(merged).sort((a, b) => b[1] - a[1]).slice(0, RECENT_MAX),
@@ -93,15 +119,36 @@ export async function scan() {
   await Promise.all(config.roots.map((root) => walk(root, config.maxDepth, found)));
   // ピンと最近使ったものは roots の外にあっても拾う（消えていれば isRepo で落ちる）
   for (const dir of [...config.pinned, ...Object.keys(recent)]) {
-    if (!found.includes(dir) && await isRepo(dir)) found.push(dir);
+    if (await isRepo(dir)) found.push(dir);
   }
 
-  const projects = await Promise.all([...new Set(found)].map(async (dir) => {
+  // 綴り違いの重複を落とす。先に見つけたもの（＝スキャンで出た綴り）を採る。
+  const dirs = new Map();
+  for (const dir of found) {
+    const key = await nodeKey(dir);
+    if (key && !dirs.has(key)) dirs.set(key, dir);
+  }
+  const asKeys = async (list) => new Set(
+    (await Promise.all(list.map(nodeKey))).filter(Boolean),
+  );
+  const [pinnedKeys, recentKeys] = await Promise.all([
+    asKeys(config.pinned),
+    (async () => {
+      const map = new Map();
+      for (const [dir, at] of Object.entries(recent)) {
+        const key = await nodeKey(dir);
+        if (key) map.set(key, at);
+      }
+      return map;
+    })(),
+  ]);
+
+  const projects = await Promise.all([...dirs].map(async ([key, dir]) => {
     const base = {
       path: dir,
       name: path.basename(dir),
-      pinned: config.pinned.includes(dir),
-      lastUsed: recent[dir] || 0,
+      pinned: pinnedKeys.has(key),
+      lastUsed: recentKeys.get(key) || 0,
     };
     try {
       const [meta, files] = await Promise.all([info(dir), status(dir)]);

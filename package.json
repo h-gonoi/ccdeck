@@ -15,6 +15,7 @@
     "start": "node server/index.js"
   },
   "dependencies": {
+    "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^6.0.0",
     "express": "^5.2.1",
     "node-pty": "^1.0.0",

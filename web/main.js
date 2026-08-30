@@ -46,12 +46,27 @@ function connect() {
     else if (msg.type === 'sessions') onSessions(msg.sessions);
     else if (msg.type === 'external') onExternal(msg.sessions);
     else if (msg.type === 'replay') pool.replay(msg.id, msg.data);
+    else if (msg.type === 'snapshot') pool.replay(msg.id, msg.data);
     else if (msg.type === 'output') pool.write(msg.id, msg.data);
+    else if (msg.type === 'sizeOwner') onSizeOwner(msg);
   };
   ws.onopen = () => { attached.clear(); needResync = true; };
   ws.onclose = () => setTimeout(connect, 1200); // サーバー再起動に自力で追従する
 }
 const send = (payload) => ws?.readyState === 1 && ws.send(JSON.stringify(payload));
+
+// サイズの持ち主が変わったとき。奪われた側は黙って縮まると訳が分からないので伝える。
+const owned = new Map();
+
+function onSizeOwner({ id, mine, cols, rows }) {
+  const before = owned.get(id);
+  owned.set(id, mine);
+  pool.setOwned(id, mine, cols, rows);
+  if (before === true && mine === false) {
+    const session = state.sessions.find((s) => s.id === id);
+    toast(`${session?.title ?? id} の画面サイズは他の端末が持っています`);
+  }
+}
 
 // ---------- ターミナル ----------
 const pool = new TerminalPool($('terms'), {

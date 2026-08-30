@@ -3,7 +3,10 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import xtermHeadless from '@xterm/headless';
+import xtermSerialize from '@xterm/addon-serialize';
+// どちらも CommonJS。named import は使えないので分解する。
 const { Terminal } = xtermHeadless;
+const { SerializeAddon } = xtermSerialize;
 
 // ccdeck 自体を claude セッション内から起動すると、これらが子へ継承されて
 // 「Transcript saving is off」になったり親子関係が壊れる。起動時に必ず落とす。
@@ -50,6 +53,7 @@ export class Session extends EventEmitter {
     this.replay = [];
     this.replayBytes = 0;
     this._evalTimer = null;
+    this._serializer = null;   // snapshot() を初めて呼ばれたときに作る
 
     // 状態判定専用の仮想画面。描画はせず判定にだけ使う。
     this.screen = new Terminal({ cols, rows, allowProposedApi: true, scrollback: 0 });
@@ -92,6 +96,7 @@ export class Session extends EventEmitter {
     if (this._evalTimer) return;
     this._evalTimer = setTimeout(() => {
       this._evalTimer = null;
+    this._serializer = null;   // snapshot() を初めて呼ばれたときに作る
       this._evaluate();
     }, EVAL_MS);
   }
@@ -144,6 +149,21 @@ export class Session extends EventEmitter {
     return this.replay.join('');
   }
 
+  // いま見えている画面だけを ANSI に直して返す。
+  // 判定用の headless xterm は scrollback: 0 なので、出るのはちょうど 1 画面。
+  // 512KB の replay を毎回流せない相手（スマホの復帰など）はこちらを使う。
+  snapshot() {
+    if (!this._serializer) {
+      this._serializer = new SerializeAddon();
+      this.screen.loadAddon(this._serializer);
+    }
+    try {
+      return this._serializer.serialize();
+    } catch {
+      return '';
+    }
+  }
+
   kill() {
     try { this.pty.kill(); } catch { /* すでに終了 */ }
   }
@@ -152,6 +172,7 @@ export class Session extends EventEmitter {
     return {
       id: this.id, title: this.title, cwd: this.cwd, command: this.command,
       status: this.status, unread: this.unread, bell: this.bell,
+      cols: this.cols, rows: this.rows,
       exitCode: this.exitCode, createdAt: this.createdAt, lastActivity: this.lastActivity,
     };
   }
