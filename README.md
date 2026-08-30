@@ -7,6 +7,7 @@ Cursor のような汎用 IDE を複数ウィンドウ開かずに、並行作�
 
 - 走らせている Claude Code / Codex セッションを全部リストで並べ、**手が空いたものを琥珀色で知らせる**
 - ブラウザを閉じてもセッションは死なない（PTY はサーバー側が持つ）
+- サーバーを入れ替えても、**次の起動で会話の続きから同じ枠に戻る**
 - git の差分確認・ステージ・コミット・push
 - 変更ファイルをその場で開いて直せる簡易エディタ
 
@@ -47,7 +48,8 @@ codesign --force --deep --sign - ~/Applications/ccdeck.app
 ccdeck            # サーバーを起動して独立ウィンドウを開く
 ccdeck start      # サーバーだけ起動
 ccdeck status     # 稼働状況とセッション数
-ccdeck stop       # 停止（走っているセッションも終了する）
+ccdeck stop       # 停止（走っているセッションが居れば本数を出して聞く）
+ccdeck stop --force  # 聞かずに停止
 ccdeck log        # サーバーログを追う
 ```
 
@@ -185,6 +187,7 @@ server/
   git.js       git コマンドのラッパ
   projects.js  リポジトリの自動スキャンと「最近使った」の記録
   files.js     ファイル読み書き（プロジェクト外は拒否）
+  revive.js    落ちる前に台帳を書き、次の起動で前回の続きを起こす
   external.js  他で立てられたセッションの検出とターミナル前面化
 web/
   main.js      画面の状態管理

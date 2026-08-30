@@ -44,6 +44,7 @@ function connect() {
       // サーバーが入れ替わっていたら、古い画面のまま使い続けない
       if (buildId && buildId !== msg.buildId) return location.reload();
       buildId = msg.buildId;
+      announceRevived(msg.revived);
     }
     else if (msg.type === 'sessions') onSessions(msg.sessions);
     else if (msg.type === 'external') onExternal(msg.sessions);
@@ -57,6 +58,19 @@ function connect() {
 }
 const send = (payload) => ws?.readyState === 1 && ws.send(JSON.stringify(payload));
 
+// 起動時に前回の続きを起こしていたら一度だけ伝える。
+// 繋ぎ直すたびに言われても仕方がないので、このタブで一回きり。
+let toldRevived = false;
+
+function announceRevived(revived) {
+  if (toldRevived || !revived?.total) return;
+  toldRevived = true;
+  const lost = revived.total - revived.resumed;
+  const parts = [`前回のセッション ${revived.total} 本を復元しました`];
+  if (lost) parts.push(`${lost} 本は会話を引き継げず新規で開いています`);
+  if (revived.dropped) parts.push(`${revived.dropped} 本は上限を超えたため戻していません`);
+  toast(parts.join(' · '), 7000);
+}
 
 // サイズの持ち主が変わったとき。奪われた側は黙って縮まると訳が分からないので伝える。
 const owned = new Map();
@@ -1016,12 +1030,12 @@ function toggleDrawer(open) {
 const gitLog = (text) => { $('git-log').textContent = text; };
 
 let toastTimer = null;
-function toast(text) {
+function toast(text, ms = 3200) {
   const el = $('toast');
   el.textContent = text;
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, 3200);
+  toastTimer = setTimeout(() => { el.hidden = true; }, ms);
 }
 
 // ---------- イベント ----------

@@ -70,15 +70,20 @@ function classify(screen) {
 export class Session extends EventEmitter {
   constructor({
     cwd, title, cols = 120, rows = 34, agent = 'claude', command,
-    familyId, handoffFrom = null, initialPrompt = '', resumeId = null,
+    familyId, handoffFrom = null, initialPrompt = '', resumeId = null, id = null,
   }) {
     super();
-    this.id = randomUUID().slice(0, 8);
+    // id を渡すのは復元のときだけ。前回と同じ番号にしておくと、画面が覚えている
+    // 枠割り（localStorage の ccdeck.panes）がそのまま効いて並べ方まで戻る。
+    this.id = id || randomUUID().slice(0, 8);
     this.cwd = cwd;
     this.title = title || path.basename(cwd);
     this.agent = normalizeAgent(agent);
     this.resumeId = normalizeResumeId(resumeId);
     if (initialPrompt && this.resumeId) throw new Error('引き継ぎと resume は同時に指定できません');
+    // いま書かれている会話の ID。台帳（revive.js）が定期的に埋める。
+    // 起動直後は null で、CLI が記録を書き始めてから入る。
+    this.vendorId = null;
     this.familyId = familyId || this.id;
     this.handoffFrom = handoffFrom;
     // command は内部テスト等との互換用。HTTP API からは渡さない。
@@ -217,7 +222,8 @@ export class Session extends EventEmitter {
   toJSON() {
     return {
       id: this.id, title: this.title, cwd: this.cwd, agent: this.agent, command: this.command,
-      familyId: this.familyId, handoffFrom: this.handoffFrom, resumeId: this.resumeId,
+      familyId: this.familyId, handoffFrom: this.handoffFrom,
+      resumeId: this.resumeId, vendorId: this.vendorId,
       status: this.status, unread: this.unread, bell: this.bell,
       cols: this.cols, rows: this.rows,
       exitCode: this.exitCode, createdAt: this.createdAt, lastActivity: this.lastActivity,
@@ -232,7 +238,9 @@ export class SessionManager extends EventEmitter {
   }
 
   create(opts) {
-    const session = new Session(opts);
+    // 復元で番号を引き継ぐとき、すでに埋まっていたら諦めて新しく振る
+    const id = opts.id && !this.sessions.has(opts.id) ? opts.id : null;
+    const session = new Session({ ...opts, id });
     this.sessions.set(session.id, session);
     const bump = () => this.emit('sessions');
     session.on('status', bump);

@@ -23,14 +23,25 @@ fi
 mkdir -p "$STATE_DIR"
 
 # --lan: サーバーを LAN に出す。付けない限りループバックに閉じたまま。
+# --force: stop のときに確認を飛ばす。
 SERVER_ARGS=""
+FORCE=0
 ARGS=()
 for arg in "$@"; do
-  if [[ "$arg" == "--lan" ]]; then SERVER_ARGS="--lan"; else ARGS+=("$arg"); fi
+  case "$arg" in
+    --lan) SERVER_ARGS="--lan" ;;
+    --force|-f) FORCE=1 ;;
+    *) ARGS+=("$arg") ;;
+  esac
 done
 set -- "${ARGS[@]}"
 
 alive() { curl -sf -o /dev/null --max-time 1 "$URL/api/sessions"; }
+
+session_count() {
+  curl -s --max-time 2 "$URL/api/sessions" \
+    | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' 2>/dev/null || echo 0
+}
 
 start_server() {
   if alive; then return 0; fi
@@ -68,17 +79,45 @@ case "${1:-open}" in
     fi
     ;;
   stop)
+    # 走っているセッションは道連れに死ぬ。黙って殺さず、本数を見せてから聞く。
+    count=0
+    # if で受ける。`alive && count=...` にすると、サーバーが止まっているときに
+    # 文全体が失敗して set -e で抜け、PID ファイルの掃除まで届かない。
+    if alive; then count=$(session_count); fi
+    count=${count:-0}
+    if [[ "$count" -gt 0 && "$FORCE" != 1 ]]; then
+      echo "セッション ${count} 本が走っています。停止すると全部終了します。"
+      echo "（次の start で、会話の続きから自動で復元します）"
+      if [[ ! -t 0 ]]; then
+        echo "対話端末ではないので停止しませんでした。承知の上なら: ccdeck stop --force" >&2
+        exit 1
+      fi
+      if ! read -q "?本当に停止しますか？ [y/N] "; then
+        echo
+        echo "やめました"
+        exit 1
+      fi
+      echo
+    fi
     if [[ -f "$PID_FILE" ]]; then
       kill "$(cat "$PID_FILE")" 2>/dev/null || true
       rm -f "$PID_FILE"
     fi
+    # 台帳を書き切る猶予を与えてから、取りこぼしを掃除する
+    for _ in {1..20}; do
+      alive || break
+      sleep 0.1
+    done
     pkill -f "node .*ccdeck/server/index.js" 2>/dev/null || true
-    echo "停止しました（走っていたセッションも終了します）"
+    if [[ "$count" -gt 0 ]]; then
+      echo "停止しました（セッション ${count} 本は次の start で復元します）"
+    else
+      echo "停止しました"
+    fi
     ;;
   status)
     if alive; then
-      count=$(curl -s "$URL/api/sessions" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
-      echo "稼働中 · セッション ${count} 本 · $URL"
+      echo "稼働中 · セッション $(session_count) 本 · $URL"
     else
       echo "停止中"
     fi

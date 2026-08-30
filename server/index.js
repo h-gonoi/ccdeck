@@ -11,6 +11,7 @@ import * as files from './files.js';
 import { scan, loadConfig, saveConfig, touchRecent } from './projects.js';
 import { listExternal, focusTty } from './external.js';
 import * as auth from './auth.js';
+import * as revive from './revive.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.CCDECK_PORT) || 7788;
@@ -27,6 +28,9 @@ app.use(express.json({ limit: '8mb' }));
 app.use(express.static(path.join(__dirname, '..', 'dist')));
 
 const manager = new SessionManager();
+
+// 起動時に前回の続きを起こした結果。画面に一度だけ伝えるために持っておく。
+const revived = { total: 0, resumed: 0, dropped: 0 };
 
 // サーバーを入れ替えたら、開きっぱなしの画面が古いままにならないよう合図する
 const BUILD_ID = String(Date.now());
@@ -289,7 +293,7 @@ wss.on('connection', (ws) => {
   const typed = new Set();   // このつながりで入力を始めたセッション（記録の重複よけ）
 
   const send = (payload) => { if (ws.readyState === 1) ws.send(JSON.stringify(payload)); };
-  send({ type: 'hello', buildId: BUILD_ID });
+  send({ type: 'hello', buildId: BUILD_ID, revived });
   send({ type: 'sessions', sessions: manager.list() });
   listExternal(ownPids()).then((list) => send({ type: 'external', sessions: list })).catch(() => {});
 
@@ -389,6 +393,34 @@ wss.on('connection', (ws) => {
 // 台帳を読み終える前に受け付けると、登録済みの端末を弾いてしまう
 await auth.ready;
 
+// ---- 前回の続きを起こす ----
+// アプリを落とすと PTY は道連れに死ぬ。台帳に残っていたものを、同じ番号・同じ場所で
+// 立て直す。会話 ID が残っていれば --resume で続きから、無ければ素で開き直す。
+// 番号を引き継ぐので、画面が覚えている枠割りもそのまま戻る。
+try {
+  const { restore, dropped } = await revive.takePending();
+  revived.dropped = dropped;
+  for (const entry of restore) {
+    try {
+      manager.create({
+        id: entry.id, cwd: entry.cwd, title: entry.title, agent: entry.agent,
+        familyId: entry.familyId, resumeId: entry.resumeId,
+      });
+      revived.total += 1;
+      if (entry.resumeId) revived.resumed += 1;
+    } catch (err) {
+      console.error(`  復元できませんでした: ${entry.title} — ${err.message}`);
+    }
+  }
+  if (revived.total) {
+    console.log(`前回のセッション ${revived.total} 本を復元しました`
+      + `（うち ${revived.resumed} 本は会話つき）`);
+  }
+  if (dropped) console.log(`  ${dropped} 本は上限を超えたため復元していません`);
+} catch { /* 台帳が壊れていても起動そのものは止めない */ }
+
+// ここから先は、生きているセッションを台帳に書き続ける
+revive.follow(manager);
 
 server.listen(PORT, HOST, () => {
   if (!LAN) {
@@ -402,6 +434,12 @@ server.listen(PORT, HOST, () => {
   console.log(`  記録: ${auth.AUDIT_PATH}`);
 });
 
-const shutdown = () => { manager.killAll(); process.exit(0); };
+// 落ちる前に台帳を書く。ここを飛ばすと次の起動で何も戻せない。
+// killAll より先に書くこと（会話 ID は CLI が生きている間しか引けない）。
+const shutdown = () => {
+  revive.saveSync(manager);
+  manager.killAll();
+  process.exit(0);
+};
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
