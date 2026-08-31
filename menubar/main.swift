@@ -4,7 +4,30 @@ import Cocoa
 // 目的はひとつ、「自分の番が来たセッションがあるか」を画面の隅で伝えること。
 let PORT = 7788
 let BASE = "http://127.0.0.1:\(PORT)"
-let DECK = NSString(string: "~/projects/ccdeck/bin/ccdeck").expandingTildeInPath
+// ccdeck 本体の場所。clone 先は人によって違うので決め打ちにしない。
+// bin/install-menubar が実際の場所を ~/.ccdeck/deck-path に書き、それを読む。
+// 無ければ PATH の ccdeck を探し、最後に昔の既定へ落とす。
+let DECK: String = {
+    let home = NSHomeDirectory()
+    let note = "\(home)/.ccdeck/deck-path"
+    if let saved = try? String(contentsOfFile: note, encoding: .utf8) {
+        let path = saved.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !path.isEmpty && FileManager.default.isExecutableFile(atPath: path) { return path }
+    }
+    let which = Process()
+    which.executableURL = URL(fileURLWithPath: "/bin/zsh")
+    which.arguments = ["-lc", "command -v ccdeck"]
+    let pipe = Pipe()
+    which.standardOutput = pipe
+    which.standardError = FileHandle.nullDevice
+    if (try? which.run()) != nil {
+        which.waitUntilExit()
+        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let path = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !path.isEmpty && FileManager.default.isExecutableFile(atPath: path) { return path }
+    }
+    return NSString(string: "~/projects/ccdeck/bin/ccdeck").expandingTildeInPath
+}()
 
 struct Item {
     let title: String

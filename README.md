@@ -13,11 +13,16 @@ macOS 専用。**Node は 20 以上**、そして各 agent の CLI（`claude` / 
 git clone https://github.com/h-gonoi/ccdeck.git
 cd ccdeck
 npm install
-npm run build        # web/ → dist/ ここを飛ばすと画面が出ない
-./bin/ccdeck
+npm run build          # web/ → dist/ ここを飛ばすと画面が出ない
+./bin/install-menubar  # メニューバーに常駐させる
 ```
 
-`ccdeck` をどこからでも打てるようにするなら、PATH に通す:
+これで **`~/Applications/ccdeck.app`** がメニューバーに入り、ログイン時に自動で立ち上がる。
+以降はメニューバーのアイコンから開くだけでよく、ターミナルを開く必要はない。
+clone した場所は `~/.ccdeck/deck-path` に控えられるので、**どこに置いても動く**
+（あとで移したときは `./bin/install-menubar` を実行し直す）。
+
+ターミナルからも打ちたいなら PATH に通す:
 
 ```sh
 ln -s "$PWD/bin/ccdeck" /usr/local/bin/ccdeck
@@ -43,14 +48,10 @@ CCDECK_NODE=/path/to/node ccdeck    # 使う Node を明示する
 
 各 agent の CLI をそのまま擬似端末で動かしているので、スラッシュコマンドや権限プロンプトは通常どおり使える。
 
-## メニューバー（任意）
+## メニューバー
 
-```sh
-./bin/install-menubar
-```
-
-`~/Applications/ccdeck.app` を作ってメニューバーに常駐させ、ログイン時の自動起動まで入れる。
-ccdeck サーバーが止まっていれば起動時に一度だけ立ち上げてくれる。**本体だけ使うなら要らない。**
+普段はここから使う。`~/Applications/ccdeck.app` が常駐し、ログイン時に自動で立ち上がる。
+ccdeck サーバーが止まっていれば、起動時に一度だけ立ち上げてくれる。
 
 | 表示 | 意味 |
 |------|------|

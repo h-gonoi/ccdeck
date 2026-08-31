@@ -103,6 +103,14 @@ TUI の枠が崩れる。`syncPanes()` は **setVisible（fit して resize 送�
 
 named import が使えない。`import xtermHeadless from '@xterm/headless'` してから分解する。
 
+### メニューバーアプリに clone 先を決め打ちしない
+
+`menubar/main.swift` は ccdeck 本体の場所を **`~/.ccdeck/deck-path`** から読む。
+このファイルは `bin/install-menubar` が書く。無ければ PATH の `ccdeck` を探す。
+
+**ここをパスの決め打ちに戻すと、自分以外の環境で動かなくなる。**
+（実際 `~/projects/ccdeck/bin/ccdeck` を直書きしていて、clone 先が違う人では起動できなかった）
+
 ### メニューバー起動時の Node をターミナルと揃える
 
 メニューバーアプリの login shell は Homebrew の Node を拾うことがあり、ターミナルで npm install した

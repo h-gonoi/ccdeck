@@ -14,6 +14,10 @@ command -v swiftc >/dev/null || {
   exit 1
 }
 
+# 本体の場所を控える。アプリはここを読んで ccdeck を起動する。
+mkdir -p "$HOME/.ccdeck"
+print -r -- "$ROOT/bin/ccdeck" > "$HOME/.ccdeck/deck-path"
+
 echo "ビルドしています…"
 cd "$ROOT/menubar"
 swiftc -O -o ccdeckbar main.swift -framework Cocoa
