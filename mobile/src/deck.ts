@@ -129,6 +129,7 @@ export type DeckState = {
   screens: Record<string, string>;   // セッション id → いまの画面（素のテキスト）
   watch: (id: string | null) => void;
   refresh: () => void;
+  send: (payload: any) => void;      // 打鍵などをそのまま流す
 };
 
 export function useDeck(link: Link | null): DeckState {
@@ -184,7 +185,9 @@ export function useDeck(link: Link | null): DeckState {
     return () => { sub.remove(); instance.close(); deck.current = null; };
   }, [link?.host, link?.token]);
 
-  return { up, sessions, external, screens, watch, refresh };
+  const send = useCallback((payload: any) => { deck.current?.send(payload); }, []);
+
+  return { up, sessions, external, screens, watch, refresh, send };
 }
 
 // 並びは PC と同じ考え方：自分の番が先。

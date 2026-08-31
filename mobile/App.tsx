@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, StatusBar, StyleSheet, View } from 'react-native';
 import { useDeck } from './src/deck';
 import Pair from './src/screens/Pair';
+import Deck from './src/screens/Deck';
 import Screen from './src/screens/Screen';
 import Sessions from './src/screens/Sessions';
 import Settings from './src/screens/Settings';
@@ -41,33 +42,15 @@ export default function App() {
     );
   }
 
-  // 見ていたセッションが終わっていたら一覧へ戻す
-  const open: Session | undefined = view.name === 'screen'
-    ? deck.sessions.find((item) => item.id === view.id)
-    : undefined;
-
   return (
     <View style={s.fill}>
       <StatusBar barStyle="light-content" />
       {view.name === 'settings' ? (
         <Settings link={link} up={deck.up} onUnlink={unlink} onBack={() => setView({ name: 'list' })} />
-      ) : open ? (
-        <Screen
-          session={open}
-          screen={deck.screens[open.id]}
-          onWatch={deck.watch}
-          onBack={() => setView({ name: 'list' })}
-        />
       ) : (
-        <Sessions
-          up={deck.up}
-          label={link.label}
-          sessions={deck.sessions}
-          external={deck.external}
-          onRefresh={deck.refresh}
-          onOpen={(item) => setView({ name: 'screen', id: item.id })}
-          onSettings={() => setView({ name: 'settings' })}
-        />
+        /* 部屋割りの画面。ここが主役。
+           素のテキストで読む従来の画面は Screen.tsx に残してある。 */
+        <Deck deck={deck} onSettings={() => setView({ name: 'settings' })} />
       )}
     </View>
   );
