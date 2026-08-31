@@ -20,6 +20,22 @@ if [[ -z "$NODE_BIN" && -f "$HOME/.nvm/alias/default" ]]; then
 fi
 [[ -n "$NODE_BIN" ]] || NODE_BIN="$(command -v node)"
 
+# npm install した Node と、ここで使う Node が違うと node-pty が読めない。
+# 分かりにくいエラーになるので、先に見比べて止める。
+if [[ -f "$ROOT/node_modules/.ccdeck-node" ]]; then
+  BUILT_WITH="$(<"$ROOT/node_modules/.ccdeck-node")"
+  NOW="$("$NODE_BIN" -p 'process.versions.modules' 2>/dev/null || echo '?')"
+  if [[ "$BUILT_WITH" != "$NOW" ]]; then
+    echo "Node が食い違っています。" >&2
+    echo "  npm install したとき: NODE_MODULE_VERSION $BUILT_WITH" >&2
+    echo "  いま使う Node:        NODE_MODULE_VERSION $NOW ($NODE_BIN)" >&2
+    echo "どちらかに揃えてください:" >&2
+    echo "  同じ Node で入れ直す : rm -rf node_modules && npm install" >&2
+    echo "  使う Node を指定する : CCDECK_NODE=/path/to/node ccdeck" >&2
+    exit 1
+  fi
+fi
+
 mkdir -p "$STATE_DIR"
 
 # --lan: サーバーを LAN に出す。付けない限りループバックに閉じたまま。

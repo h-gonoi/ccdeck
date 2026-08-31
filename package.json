@@ -12,7 +12,8 @@
   "scripts": {
     "dev": "vite build --watch & node server/index.js",
     "build": "vite build",
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "postinstall": "node -p \"process.versions.modules\" > node_modules/.ccdeck-node"
   },
   "dependencies": {
     "@xterm/addon-serialize": "^0.14.0",

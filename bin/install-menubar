@@ -1,0 +1,57 @@
+#!/bin/zsh
+# メニューバー常駐アプリを作って ~/Applications へ入れる。
+# ccdeck 本体だけ使うなら、これは要らない。
+set -e
+
+ROOT="${0:A:h:h}"
+APP="$HOME/Applications/ccdeck.app"
+LABEL="dev.ccdeck.menubar"
+PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
+
+command -v swiftc >/dev/null || {
+  echo "swiftc が見つかりません。Xcode Command Line Tools を入れてください:" >&2
+  echo "  xcode-select --install" >&2
+  exit 1
+}
+
+echo "ビルドしています…"
+cd "$ROOT/menubar"
+swiftc -O -o ccdeckbar main.swift -framework Cocoa
+
+mkdir -p "$APP/Contents/MacOS"
+cp ccdeckbar "$APP/Contents/MacOS/ccdeck"
+cat > "$APP/Contents/Info.plist" <<PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>ccdeck</string>
+  <key>CFBundleDisplayName</key><string>ccdeck</string>
+  <key>CFBundleExecutable</key><string>ccdeck</string>
+  <key>CFBundleIdentifier</key><string>${LABEL}</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>1.0</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSUIElement</key><true/>
+</dict></plist>
+PLIST_EOF
+codesign --force --deep --sign - "$APP"
+
+# ログイン時に自動で立ち上げる
+mkdir -p "$HOME/Library/LaunchAgents"
+cat > "$PLIST" <<PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>${LABEL}</string>
+  <key>ProgramArguments</key>
+  <array><string>${APP}/Contents/MacOS/ccdeck</string></array>
+  <key>RunAtLoad</key><true/>
+</dict></plist>
+PLIST_EOF
+launchctl unload "$PLIST" 2>/dev/null || true
+launchctl load "$PLIST"
+
+echo "入れました: $APP"
+echo "自動起動: $PLIST"
+echo "やめるとき: launchctl unload \"$PLIST\" && rm \"$PLIST\" && rm -rf \"$APP\""

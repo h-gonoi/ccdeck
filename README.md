@@ -3,6 +3,36 @@
 複数の Claude Code / Codex セッションを一画面で束ねるための、軽いデッキ。
 Cursor のような汎用 IDE を複数ウィンドウ開かずに、並行作業の「今どれが自分の番か」を見えるようにするために作った。
 
+## 入れる
+
+macOS 専用。**Node は 20 以上**、そして各 agent の CLI（`claude` / `codex`）が
+すでに使える状態であること。`node-pty` を native ビルドするので Xcode Command Line Tools も要る
+（`xcode-select --install`）。
+
+```sh
+git clone https://github.com/h-gonoi/ccdeck.git
+cd ccdeck
+npm install
+npm run build        # web/ → dist/ ここを飛ばすと画面が出ない
+./bin/ccdeck
+```
+
+`ccdeck` をどこからでも打てるようにするなら、PATH に通す:
+
+```sh
+ln -s "$PWD/bin/ccdeck" /usr/local/bin/ccdeck
+```
+
+### Node は 1 つに揃える
+
+`npm install` した Node と、`ccdeck` が起動に使う Node が違うと `node-pty` を読めずに落ちる。
+nvm を使っているなら `~/.nvm/alias/default` の Node が優先される。食い違っていれば
+起動時にその旨を出して止まるので、どちらかに揃えること。
+
+```sh
+CCDECK_NODE=/path/to/node ccdeck    # 使う Node を明示する
+```
+
 ## 何をするもの
 
 - 走らせている Claude Code / Codex セッションを全部リストで並べ、**手が空いたものを琥珀色で知らせる**
@@ -13,10 +43,14 @@ Cursor のような汎用 IDE を複数ウィンドウ開かずに、並行作�
 
 各 agent の CLI をそのまま擬似端末で動かしているので、スラッシュコマンドや権限プロンプトは通常どおり使える。
 
-## メニューバー
+## メニューバー（任意）
 
-`~/Applications/ccdeck.app` がメニューバーに常駐する。ログイン時に自動で立ち上がり、
-ccdeck サーバーが止まっていれば起動時に一度だけ立ち上げてくれる。
+```sh
+./bin/install-menubar
+```
+
+`~/Applications/ccdeck.app` を作ってメニューバーに常駐させ、ログイン時の自動起動まで入れる。
+ccdeck サーバーが止まっていれば起動時に一度だけ立ち上げてくれる。**本体だけ使うなら要らない。**
 
 | 表示 | 意味 |
 |------|------|
@@ -27,20 +61,15 @@ ccdeck サーバーが止まっていれば起動時に一度だけ立ち上げ�
 クリックすると全セッションが状態つきで並ぶ。ccdeck のものを選べばウィンドウが開き、
 他のターミナルのものを選べばそのウィンドウが前に出る。
 
-止めたいときはメニューから「終了」。自動起動をやめるなら:
+止めたいときはメニューから「終了」。まるごとやめるなら:
 
 ```sh
 launchctl unload ~/Library/LaunchAgents/dev.ccdeck.menubar.plist
 rm ~/Library/LaunchAgents/dev.ccdeck.menubar.plist
+rm -rf ~/Applications/ccdeck.app
 ```
 
-ソースは `menubar/main.swift`。作り直すときは:
-
-```sh
-cd menubar && swiftc -O -o ccdeckbar main.swift -framework Cocoa
-cp ccdeckbar ~/Applications/ccdeck.app/Contents/MacOS/ccdeck
-codesign --force --deep --sign - ~/Applications/ccdeck.app
-```
+ソースは `menubar/main.swift`。直したら `./bin/install-menubar` で入れ直す。
 
 ## 使い方
 
@@ -212,7 +241,9 @@ Claude Code は**待機中もステータスラインを更新し続ける**た�
 
 ### 設定
 
-`~/.ccdeck/config.json` でスキャン対象を変えられる。
+`~/.ccdeck/config.json` でスキャン対象を変えられる。既定では
+`~/projects` `~/dev` `~/Documents` の下を 2 階層まで見て、git リポジトリを拾う。
+別の場所に置いているなら、ここを書き換える。
 
 ```json
 {
