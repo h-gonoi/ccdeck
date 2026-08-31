@@ -124,7 +124,12 @@ case "${1:-open}" in
       alive || break
       sleep 0.1
     done
-    pkill -f "node .*ccdeck/server/index.js" 2>/dev/null || true
+    # 起動は (cd "$ROOT" && node server/index.js) なので、コマンドラインに
+    # ccdeck の文字は入らない。取り違えないよう、この ROOT の server/index.js を
+    # 開いているプロセスだけを狙って落とす。
+    for pid in $(pgrep -f "server/index.js" 2>/dev/null); do
+      [[ "$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | tail -1)" == "n$ROOT" ]] && kill "$pid" 2>/dev/null
+    done
     if [[ "$count" -gt 0 ]]; then
       echo "停止しました（セッション ${count} 本は次の start で復元します）"
     else
