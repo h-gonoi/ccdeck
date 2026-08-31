@@ -46,7 +46,8 @@ export default function App() {
     <View style={s.fill}>
       <StatusBar barStyle="light-content" />
       {view.name === 'settings' ? (
-        <Settings link={link} up={deck.up} onUnlink={unlink} onBack={() => setView({ name: 'list' })} />
+        <Settings link={link} up={deck.up} onUnlink={unlink} onRelink={link_}
+          onBack={() => setView({ name: 'list' })} />
       ) : (
         /* 部屋割りの画面。ここが主役。
            素のテキストで読む従来の画面は Screen.tsx に残してある。 */

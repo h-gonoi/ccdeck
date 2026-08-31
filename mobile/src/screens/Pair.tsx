@@ -35,7 +35,12 @@ export default function Pair({ onLinked }: { onLinked: (link: Link) => void }) {
     try {
       const name = Platform.OS === 'ios' ? 'iPhone' : 'Android';
       const { token } = await api.pair(address, code.trim(), name, Platform.OS);
-      onLinked({ host: address, token, label: found?.hostname ?? address });
+      onLinked({
+        host: address, token,
+        label: found?.hostname ?? address,
+        // アドレスが変わっても追えるよう、mDNS 名も控えておく
+        alt: found?.hostname ? `${found.hostname}:${found.port}` : undefined,
+      });
     } catch (err: any) {
       setError(err.message);
     } finally {

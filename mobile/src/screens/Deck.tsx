@@ -45,6 +45,9 @@ export default function Deck({ deck, onSettings }: { deck: DeckState; onSettings
       deck.send({ type: 'input', id: m.id, data: m.data });
     } else if (m.t === 'settings') {
       onSettings();
+    } else if (m.t === 'error') {
+      // 絵の側で落ちたら黙らせない。盤が止まる原因はここに出る。
+      console.warn('[scene]', m.where, m.msg);
     }
   }
 

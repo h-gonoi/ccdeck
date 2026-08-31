@@ -12,6 +12,21 @@ type Handler = (msg: any) => void;
 
 // WebSocket は React Native 側が一本だけ持つ。
 // 画面をまたいでも繋ぎ直さないので、再接続の面倒がここに集まる。
+/* 繋ぎ先の候補を順に当てて、最初に応えたものを使う。
+   LAN の IP は変わるので、控えておいた mDNS 名で拾い直せるようにする。 */
+async function reachable(link: Link): Promise<string> {
+  const tries = [link.host, link.alt].filter(Boolean) as string[];
+  for (const host of tries) {
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), 2500);
+    try {
+      const res = await fetch(`http://${host}/api/health`, { signal: abort.signal });
+      if (res.ok) return host;
+    } catch { /* 次の候補へ */ } finally { clearTimeout(timer); }
+  }
+  return link.host;
+}
+
 class Deck {
   private ws: WebSocket | null = null;
   private generation = 0;
@@ -41,6 +56,14 @@ class Deck {
       try { this.ws.close(); } catch { /* すでに閉じている */ }
       this.ws = null;
     }
+    // 繋ぎ先を先に確かめてから開く。IP が変わっていても mDNS 名で拾い直せる。
+    reachable(this.link).then((host) => {
+      if (this.stopped || generation !== this.generation) return;
+      this.connect(host, generation);
+    });
+  }
+
+  private connect(host: string, generation: number) {
     try {
       // React Native の WebSocket は第3引数でヘッダを渡せる。
       // トークンを URL に載せずに済むので、こちらを使う。
@@ -48,7 +71,7 @@ class Deck {
       const Sock = WebSocket as unknown as new (
         url: string, protocols: string[], options: { headers: Record<string, string> },
       ) => WebSocket;
-      this.ws = new Sock(`${wsBase(this.link.host)}/ws`, [], {
+      this.ws = new Sock(`${wsBase(host)}/ws`, [], {
         headers: { Authorization: `Bearer ${this.link.token}` },
       });
     } catch {

@@ -38,4 +38,6 @@ export type Health = {
 };
 
 // 繋ぎ先。host は "192.168.1.20:7788" の形。
-export type Link = { host: string; token: string; label: string };
+// 繋ぎ先。host は "192.168.1.20:7788" の形。
+// LAN の IP は DHCP で変わるので、mDNS のホスト名も控えて順に試す。
+export type Link = { host: string; token: string; label: string; alt?: string };
