@@ -75,10 +75,17 @@ function announceRevived(revived) {
 // サイズの持ち主が変わったとき。奪われた側は黙って縮まると訳が分からないので伝える。
 const owned = new Map();
 
-function onSizeOwner({ id, mine, cols, rows }) {
+function onSizeOwner({ id, mine }) {
   const before = owned.get(id);
   owned.set(id, mine);
-  pool.setOwned(id, mine, cols, rows);
+  pool.setOwned(id);
+  // この窓に出している枠は、この窓の桁数に合わせる。
+  // 手前に居るときだけ取り返すので、窓が二つあっても取り合いにならない。
+  if (!mine && state.panes.includes(id) && document.hasFocus()) {
+    const { cols, rows } = pool.size(id);
+    send({ type: 'claimSize', id, cols, rows });
+    return;
+  }
   if (before === true && mine === false) {
     const session = state.sessions.find((s) => s.id === id);
     toast(`${session?.title ?? id} の画面サイズは他の端末が持っています`);

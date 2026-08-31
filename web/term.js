@@ -18,13 +18,6 @@ const THEME = {
 
 // 分割すると1ペインが細くなる。Claude Code の TUI は桁数が足りないと崩れるので、
 // ペインの実寸に合わせて文字を詰める。
-// 持ち主が別にいる枠は、あちらの桁数のまま描く。
-// 等幅フォントの字送りはだいたい fontSize の 0.6 倍なので、そこから逆算する。
-function fontToFit(width, cols) {
-  const size = Math.floor(width / cols / 0.6);
-  return Math.max(6, Math.min(12, size));
-}
-
 function fontSizeFor(width) {
   if (width > 1000) return 12;
   if (width > 700) return 11;
@@ -128,14 +121,12 @@ export class TerminalPool {
     if (status != null) entry.dot.className = `pane__dot pane__dot--${status}`;
   }
 
-  // サイズの持ち主が誰かをサーバーから教わる。
-  // 持ち主でない間は、こちらの都合で PTY のサイズを動かさない。
-  setOwned(id, owned, cols, rows) {
+  // サイズの持ち主が変わったと教わったら、測り直して送り直す。
+  // 桁数を決める権利はサーバーが判断するので、こちらは黙って測るだけでよい。
+  setOwned(id) {
     const entry = this.entries.get(id);
     if (!entry) return;
-    entry.owned = owned;
-    entry.remote = owned ? null : { cols, rows };
-    entry.lastSize = null;   // 持ち主に戻ったら測り直して送る
+    entry.lastSize = null;
     this.fitAll();
   }
 
@@ -145,17 +136,6 @@ export class TerminalPool {
       if (!entry || entry.wrapper.hidden) continue;
       const width = entry.body.clientWidth;
       if (!width) continue;
-
-      // 持ち主が別にいる：あちらの桁数に合わせ、入るところまで字を詰める。
-      // ここで fit すると PTY を奪い合って TUI が崩れる。
-      if (entry.owned === false && entry.remote?.cols) {
-        const { cols, rows } = entry.remote;
-        entry.term.options.fontSize = fontToFit(width, cols);
-        if (entry.term.cols !== cols || entry.term.rows !== rows) {
-          try { entry.term.resize(cols, rows); } catch { /* 直後の破棄は無視 */ }
-        }
-        continue;
-      }
 
       const size = fontSizeFor(width);
       if (entry.term.options.fontSize !== size) entry.term.options.fontSize = size;

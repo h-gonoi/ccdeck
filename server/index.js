@@ -292,6 +292,7 @@ wss.on('connection', (ws) => {
   const attached = new Set();
   const pumps = new Map();
   const typed = new Set();   // このつながりで入力を始めたセッション（記録の重複よけ）
+  const peek = new Set();    // 小さな画面で覗いているセッション（桁数を勝手に変えさせない）
 
   const send = (payload) => { if (ws.readyState === 1) ws.send(JSON.stringify(payload)); };
   send({ type: 'hello', buildId: BUILD_ID, revived });
@@ -303,6 +304,7 @@ wss.on('connection', (ws) => {
     const pump = pumps.get(id);
     if (session && pump) session.off('data', pump);
     pump?.stop?.();
+    peek.delete(id);
     pumps.delete(id);
     attached.delete(id);
     dropViewer(id, ws);
@@ -337,6 +339,8 @@ wss.on('connection', (ws) => {
           : { type: 'snapshot', id: msg.id, data: session.snapshot(), cols: session.cols, rows: session.rows });
 
         let pump;
+        if (msg.mode === 'snapshot' || msg.mode === 'text' || msg.mode === 'chat') peek.add(msg.id);
+        else peek.delete(msg.id);
         if (msg.mode === 'snapshot' || msg.mode === 'text' || msg.mode === 'chat') {
           send(shot());
           let timer = null;
@@ -368,11 +372,11 @@ wss.on('connection', (ws) => {
       }
       case 'resize': {
         if (!session) break;
-        // 誰も持っていなければ、送ってきた人が持つ。
-        // 画面側は「fit して resize → attach」の順で動くので、ここを塞ぐと
-        // 最初の 1 本のサイズが決まらなくなる。
-        if (!owners.has(msg.id)) owners.set(msg.id, ws);
-        if (owners.get(msg.id) !== ws) break;   // 持ち主でなければ黙って捨てる
+        // 画面いっぱいで見ている相手（PC）は、これまでどおり自由に桁数を決められる。
+        // 止めたいのは、小さな画面で覗いている相手（スマホ）が PC の画面を
+        // 45 桁に潰してしまうことだけ。覗き見は claimSize で奪ってからでないと変えられない。
+        if (peek.has(msg.id) && owners.get(msg.id) !== ws) break;
+        if (owners.get(msg.id) !== ws) setOwner(msg.id, ws);
         session.resize(msg.cols, msg.rows);
         break;
       }
