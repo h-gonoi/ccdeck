@@ -56,9 +56,12 @@ function sane(entry) {
     return null;
   }
   const createdAt = Number(entry.createdAt) || Date.now();
-  if (Date.now() - createdAt > MAX_AGE_MS) return null;
+  const lastActivity = Number(entry.lastActivity) || createdAt;
+  // 古さは「最後に触った時刻」で見る。立て直すたびに createdAt は更新されるので、
+  // そちらで測ると「最後に使ってから」ではなく「最後に復元してから」になってしまう。
+  if (Date.now() - lastActivity > MAX_AGE_MS) return null;
   // 消えた会話を --resume に渡すと CLI が即落ちする。無ければ素で開き直す。
-  const resumeId = resumeAvailable(entry.agent, entry.cwd, entry.resumeId, createdAt)
+  const resumeId = resumeAvailable(entry.agent, entry.cwd, entry.resumeId)
     ? entry.resumeId
     : null;
   return {
@@ -69,7 +72,7 @@ function sane(entry) {
     familyId: typeof entry.familyId === 'string' ? entry.familyId : null,
     resumeId,
     createdAt,
-    lastActivity: Number(entry.lastActivity) || createdAt,
+    lastActivity,
   };
 }
 
