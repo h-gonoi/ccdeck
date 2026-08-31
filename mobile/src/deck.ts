@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { toPlain } from './ansi';
 import { wsBase } from './api';
-import type { External, Link, Session } from './types';
+import type { External, Link, Session, Turn } from './types';
 
 const BEAT_MS = 20000;    // 生存確認を送る間隔
 const DEAD_MS = 10000;    // 返事がなければ切って張り直す
@@ -150,6 +150,7 @@ export type DeckState = {
   sessions: Session[];
   external: External[];
   screens: Record<string, string>;   // セッション id → いまの画面（素のテキスト）
+  chats: Record<string, Turn[]>;     // セッション id → 会話の並び（読む用）
   watch: (id: string | null) => void;
   refresh: () => void;
   send: (payload: any) => void;      // 打鍵などをそのまま流す
@@ -160,6 +161,7 @@ export function useDeck(link: Link | null): DeckState {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [external, setExternal] = useState<External[]>([]);
   const [screens, setScreens] = useState<Record<string, string>>({});
+  const [chats, setChats] = useState<Record<string, Turn[]>>({});
   const deck = useRef<Deck | null>(null);
   const watching = useRef<string | null>(null);
 
@@ -169,7 +171,7 @@ export function useDeck(link: Link | null): DeckState {
     if (before === id) return;
     if (before) deck.current?.send({ type: 'detach', id: before });
     watching.current = id;
-    if (id) deck.current?.send({ type: 'attach', id, mode: 'text' });
+    if (id) deck.current?.send({ type: 'attach', id, mode: 'chat' });
   }, []);
 
   const refresh = useCallback(() => deck.current?.open(), []);
@@ -181,6 +183,9 @@ export function useDeck(link: Link | null): DeckState {
       (msg) => {
         if (msg.type === 'sessions') setSessions(msg.sessions);
         else if (msg.type === 'external') setExternal(msg.sessions);
+        else if (msg.type === 'chat') {
+          setChats((prev) => ({ ...prev, [msg.id]: msg.turns ?? [] }));
+        }
         else if (msg.type === 'snapshot') {
           // text は画面の文字がそのまま入っている（桁を知っているサーバーが組む）。
           // data しか来ない相手のときだけ、こちらで ANSI を剥がす。
@@ -192,7 +197,7 @@ export function useDeck(link: Link | null): DeckState {
         setUp(isUp);
         // 繋ぎ直したら、見ていたセッションに戻る
         if (isUp && watching.current) {
-          instance.send({ type: 'attach', id: watching.current, mode: 'text' });
+          instance.send({ type: 'attach', id: watching.current, mode: 'chat' });
         }
       },
     );
@@ -210,7 +215,7 @@ export function useDeck(link: Link | null): DeckState {
 
   const send = useCallback((payload: any) => { deck.current?.send(payload); }, []);
 
-  return { up, sessions, external, screens, watch, refresh, send };
+  return { up, sessions, external, screens, chats, watch, refresh, send };
 }
 
 // 並びは PC と同じ考え方：自分の番が先。

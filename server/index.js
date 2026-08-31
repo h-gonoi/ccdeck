@@ -12,6 +12,7 @@ import { scan, loadConfig, saveConfig, touchRecent } from './projects.js';
 import { listExternal, focusTty } from './external.js';
 import * as auth from './auth.js';
 import * as revive from './revive.js';
+import { conversationFor } from './transcripts.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.CCDECK_PORT) || 7788;
@@ -328,12 +329,15 @@ wss.on('connection', (ws) => {
         // ANSI を送って向こうで剥がすと、カーソル移動で作られた横の間隔が消えて
         // 「Claude Codev2.1.231」のように詰まる。桁を正しく知っているのはこちら側
         // なので、素のテキストが要る相手にはこちらで組んでから渡す。
-        const shot = () => (msg.mode === 'text'
+        // chat … 会話の並び。ターミナルの生画面ではなく、読める形で渡す
+        const chat = () => ({ type: 'chat', id: msg.id, turns: conversationFor(session) });
+
+        const shot = () => (msg.mode === 'chat' ? chat() : msg.mode === 'text'
           ? { type: 'snapshot', id: msg.id, text: session.screenText(), cols: session.cols, rows: session.rows }
           : { type: 'snapshot', id: msg.id, data: session.snapshot(), cols: session.cols, rows: session.rows });
 
         let pump;
-        if (msg.mode === 'snapshot' || msg.mode === 'text') {
+        if (msg.mode === 'snapshot' || msg.mode === 'text' || msg.mode === 'chat') {
           send(shot());
           let timer = null;
           pump = () => {

@@ -26,6 +26,9 @@ export type External = {
   tty?: string;
 };
 
+/* 会話のひとこと。ターミナルの生画面ではなく、これを読ませる。 */
+export type Turn = { role: 'user' | 'assistant'; text: string; tools: string[] };
+
 export type Health = {
   name: string;
   version: string;

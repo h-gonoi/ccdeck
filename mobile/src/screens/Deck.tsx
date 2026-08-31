@@ -25,11 +25,11 @@ export default function Deck({ deck, onSettings }: { deck: DeckState; onSettings
     push({ t: 'state', up: deck.up, selId: sel.current, sessions: deck.sessions });
   }, [deck.sessions, deck.up]);
 
-  // 見ているセッションの画面が来たら流す
+  // 見ているセッションの会話が来たら流す
   useEffect(() => {
     if (!sel.current) return;
-    push({ t: 'text', text: deck.screens[sel.current] ?? '' });
-  }, [deck.screens]);
+    push({ t: 'chat', turns: deck.chats[sel.current] ?? [] });
+  }, [deck.chats]);
 
   function fromScene(raw: string) {
     let m: any;
@@ -40,7 +40,7 @@ export default function Deck({ deck, onSettings }: { deck: DeckState; onSettings
       sel.current = m.id;
       deck.watch(m.id);
       push({ t: 'state', up: deck.up, selId: m.id, sessions: deck.sessions });
-      push({ t: 'text', text: deck.screens[m.id] ?? '' });
+      push({ t: 'chat', turns: deck.chats[m.id] ?? [] });
     } else if (m.t === 'input') {
       deck.send({ type: 'input', id: m.id, data: m.data });
     } else if (m.t === 'settings') {

@@ -286,3 +286,53 @@ export function transcriptFor(session) {
     return '';
   }
 }
+
+/* 会話を「発言の並び」として返す。ターミナルの生画面ではなく、
+   スマホで読める形に組み替えるために使う。
+   ツールの実行は名前だけ拾って畳む（中身は長すぎて読めない）。 */
+function turnsClaude(file, limit) {
+  const turns = [];
+  for (const entry of jsonLines(file)) {
+    if (!['user', 'assistant'].includes(entry.type)) continue;
+    const role = entry.message?.role || entry.type;
+    const blocks = Array.isArray(entry.message?.content) ? entry.message.content : [];
+    const tools = blocks.filter((b) => b?.type === 'tool_use').map((b) => b.name).filter(Boolean);
+    const text = blocks
+      .filter((b) => typeof b?.text === 'string')
+      .map((b) => b.text).join('\n').trim()
+      || (typeof entry.message?.content === 'string' ? entry.message.content.trim() : '');
+    // ツール結果だけの user 発言は、こちらの発言ではないので出さない
+    const onlyResult = role === 'user' && !text && blocks.some((b) => b?.type === 'tool_result');
+    if (onlyResult) continue;
+    if (!text && !tools.length) continue;
+    turns.push({ role, text, tools });
+  }
+  return turns.slice(-limit);
+}
+
+function turnsCodex(file, limit) {
+  const turns = [];
+  for (const entry of jsonLines(file)) {
+    if (entry.type !== 'response_item') continue;
+    const item = entry.payload;
+    if (item?.type === 'message' && ['user', 'assistant'].includes(item.role)) {
+      const text = contentText(item.content).trim();
+      if (text) turns.push({ role: item.role, text, tools: [] });
+    } else if (item?.type === 'function_call' && item.name) {
+      const last = turns[turns.length - 1];
+      if (last && last.role === 'assistant') last.tools.push(item.name);
+      else turns.push({ role: 'assistant', text: '', tools: [item.name] });
+    }
+  }
+  return turns.slice(-limit);
+}
+
+export function conversationFor(session, limit = 24) {
+  try {
+    const file = session.agent === 'claude' ? claudeTranscript(session) : codexTranscript(session);
+    if (!file) return [];
+    return session.agent === 'claude' ? turnsClaude(file, limit) : turnsCodex(file, limit);
+  } catch {
+    return [];
+  }
+}
