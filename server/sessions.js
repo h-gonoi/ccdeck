@@ -71,6 +71,7 @@ export class Session extends EventEmitter {
   constructor({
     cwd, title, cols = 120, rows = 34, agent = 'claude', command,
     familyId, handoffFrom = null, initialPrompt = '', resumeId = null, id = null,
+    createdAt = null,
   }) {
     super();
     // id を渡すのは復元のときだけ。前回と同じ番号にしておくと、画面が覚えている
@@ -93,7 +94,10 @@ export class Session extends EventEmitter {
     this.status = 'starting';
     this.unread = false;
     this.bell = false;
-    this.createdAt = Date.now();
+    // createdAt も復元でだけ渡す。会話がいつ始まったかは Codex の resume 先を
+    // 探す手がかりになる（記録が始めた日のディレクトリに置かれるため）。
+    // 立て直すたびに「今」へ更新すると、日をまたいだ会話を見つけられなくなる。
+    this.createdAt = createdAt || Date.now();
     this.lastActivity = Date.now();
     this.exitCode = null;
     this.replay = [];

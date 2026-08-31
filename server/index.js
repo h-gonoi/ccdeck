@@ -414,7 +414,7 @@ try {
     try {
       manager.create({
         id: entry.id, cwd: entry.cwd, title: entry.title, agent: entry.agent,
-        familyId: entry.familyId, resumeId: entry.resumeId,
+        familyId: entry.familyId, resumeId: entry.resumeId, createdAt: entry.createdAt,
       });
       revived.total += 1;
       if (entry.resumeId) revived.resumed += 1;
