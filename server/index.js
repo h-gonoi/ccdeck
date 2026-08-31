@@ -338,10 +338,12 @@ wss.on('connection', (ws) => {
           ? { type: 'snapshot', id: msg.id, text: session.screenText(), cols: session.cols, rows: session.rows }
           : { type: 'snapshot', id: msg.id, data: session.snapshot(), cols: session.cols, rows: session.rows });
 
+        // 小さな画面で覗いている相手か、画面いっぱいで見ている相手か
+        const peeking = msg.mode === 'snapshot' || msg.mode === 'text' || msg.mode === 'chat';
+        if (peeking) peek.add(msg.id); else peek.delete(msg.id);
+
         let pump;
-        if (msg.mode === 'snapshot' || msg.mode === 'text' || msg.mode === 'chat') peek.add(msg.id);
-        else peek.delete(msg.id);
-        if (msg.mode === 'snapshot' || msg.mode === 'text' || msg.mode === 'chat') {
+        if (peeking) {
           send(shot());
           let timer = null;
           pump = () => {
