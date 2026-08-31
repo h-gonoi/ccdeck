@@ -57,11 +57,11 @@ function sane(entry) {
   }
   const createdAt = Number(entry.createdAt) || Date.now();
   const lastActivity = Number(entry.lastActivity) || createdAt;
-  // 古さは「最後に触った時刻」で見る。createdAt は会話が始まった時刻であって、
-  // 立て直しても動かさない（Codex の resume 先を日付で探すのに要る）。
+  // 古さは「最後に触った時刻」で見る。立て直すたびに createdAt は更新されるので、
+  // そちらで測ると「最後に使ってから」ではなく「最後に復元してから」になってしまう。
   if (Date.now() - lastActivity > MAX_AGE_MS) return null;
   // 消えた会話を --resume に渡すと CLI が即落ちする。無ければ素で開き直す。
-  const resumeId = resumeAvailable(entry.agent, entry.cwd, entry.resumeId, createdAt)
+  const resumeId = resumeAvailable(entry.agent, entry.cwd, entry.resumeId)
     ? entry.resumeId
     : null;
   return {
