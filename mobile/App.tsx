@@ -74,7 +74,7 @@ function Shell() {
       ) : route.name === 'butler' ? (
         <Butler deck={deck} link={link} onBack={() => setRoute({ name: 'lobby' })} onOpen={(id) => setRoute({ name: 'room', id })} />
       ) : room ? (
-        <Room key={room.id} session={room} deck={deck} onBack={() => setRoute({ name: 'lobby' })} />
+        <Room key={room.id} session={room} deck={deck} link={link} onBack={() => setRoute({ name: 'lobby' })} />
       ) : (
         /* 住人が帰った（セッションが消えた）ときもここに落ちる */
         <Lobby

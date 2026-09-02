@@ -240,17 +240,34 @@ export function useDeck(link: Link | null): DeckState {
 
   const send = useCallback((payload: any) => { deck.current?.send(payload); }, []);
   const sendKey = useCallback((id: string, seq: string) => { deck.current?.send({ type: 'input', id, data: seq }); }, []);
-  // 文章は本文と Enter を分けて送る。ひとかたまりだと貼り付け扱いになって送信されないことがある
+  /* 文章は貼り付け（bracketed paste）として送り、Enter は少し置いてから送る。
+     ひとかたまりだと改行が送信と取られたり、送信されなかったりする。
+     先頭が ! のときは ! だけ打鍵として先に送る。貼り付けでは bash モードに入らない。
+     （/ も同じ理由で先に打つ。貼り付けた /clear は命令として扱われないことがある） */
   const sendText = useCallback((id: string, text: string) => {
-    if (!deck.current?.send({ type: 'input', id, data: text })) return;
-    setTimeout(() => deck.current?.send({ type: 'input', id, data: '\r' }), CR_GAP_MS);
+    const ESC = String.fromCharCode(27);
+    const push = (data: string) => deck.current?.send({ type: 'input', id, data });
+    let rest = text;
+    let wait = 0;
+    if (/^[!\/]/.test(text)) {
+      if (!push(text[0])) return;
+      rest = text.slice(1);
+      wait = CR_GAP_MS;
+    }
+    if (rest) {
+      setTimeout(() => push(`${ESC}[200~${rest}${ESC}[201~`), wait);
+      wait += CR_GAP_MS;
+    }
+    setTimeout(() => push('\r'), wait + CR_GAP_MS);
   }, []);
 
   return { up, sessions, external, screens, chats, butler, chatOk, watch, refresh, send, sendKey, sendText };
 }
 
-// 並びは PC と同じ考え方：自分の番が先。
-export function byUrgency<T extends { status: string; unread?: boolean; lastActivity?: number }>(list: T[]): T[] {
-  const weight = (s: T) => (s.status === 'attention' ? 0 : s.unread ? 1 : s.status === 'exited' ? 3 : 2);
-  return [...list].sort((a, b) => weight(a) - weight(b) || (b.lastActivity ?? 0) - (a.lastActivity ?? 0));
+// 並びは PC と同じ考え方：自分の番が先。同じ重さの中は名前順で固定する。
+// 最終活動の順にすると、出力があるたびに行が入れ替わって目で追えない。
+export function byUrgency<T extends { status: string; unread?: boolean; title?: string }>(list: T[]): T[] {
+  const weight = (s: T) => (s.status === 'attention' ? 0 : s.unread ? 1
+    : (s.status === 'running' || s.status === 'starting') ? 2 : s.status === 'exited' ? 4 : 3);
+  return [...list].sort((a, b) => weight(a) - weight(b) || String(a.title ?? '').localeCompare(String(b.title ?? '')));
 }
