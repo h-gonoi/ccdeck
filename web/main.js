@@ -81,18 +81,25 @@ function announceRevived(revived) {
 const owned = new Map();
 const claimedAt = new Map();   // 取り返した時刻。往復よけ
 
-function onSizeOwner({ id, mine }) {
+function onSizeOwner({ id, mine, cols, rows }) {
   const before = owned.get(id);
   owned.set(id, mine);
-  pool.setOwned(id);
-  // この窓に出している枠は、この窓の桁数に合わせる。
-  // 手前に居るときだけ取り返す。窓が二つとも手前だと判定されうるので、
-  // 同じ枠を続けて取り返さないよう少し間を置く（往復を止める）。
-  if (!mine && state.panes.includes(id) && document.hasFocus()
-      && Date.now() - (claimedAt.get(id) ?? 0) > 3000) {
+  const ours = pool.size(id);
+  const differs = ours && (ours.cols !== cols || ours.rows !== rows);
+  // 持ち主が自分なら、桁数が違うときだけ一度だけ合わせ直す。
+  // 同じなら黙る。通知のたびに測って送り返すと、窓が二つあるだけで
+  // 持ち主が秒に何十回も入れ替わる往復になる（実際になった。PC が点滅し、
+  // 描画途中の画面で状態判定まで揺れた）。
+  if (mine) {
+    if (differs) pool.setOwned(id);
+    return;
+  }
+  // 奪われた側は、手前に居て桁数が違うときだけ取り返す。取り返しは 10 秒に一度まで。
+  if (differs && state.panes.includes(id) && document.hasFocus()
+      && document.visibilityState === 'visible'
+      && Date.now() - (claimedAt.get(id) ?? 0) > 10000) {
     claimedAt.set(id, Date.now());
-    const { cols, rows } = pool.size(id);
-    send({ type: 'claimSize', id, cols, rows });
+    send({ type: 'claimSize', id, cols: ours.cols, rows: ours.rows });
     return;
   }
   if (before === true && mine === false) {

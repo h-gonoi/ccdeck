@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { AGENT_COMMANDS, SessionManager, normalizeAgent } from './sessions.js';
 import * as git from './git.js';
 import * as files from './files.js';
-import { scan, loadConfig, saveConfig, touchRecent } from './projects.js';
+import { CONFIG_DIR, scan, loadConfig, saveConfig, touchRecent } from './projects.js';
 import { listExternal, focusTty } from './external.js';
 import * as auth from './auth.js';
 import * as revive from './revive.js';
@@ -209,6 +209,25 @@ app.post('/api/files/write', wrap(async (req, res) => {
   res.json(await files.writeFile(req.body.cwd, req.body.path, req.body.content));
 }));
 
+// スマホからの画像。プロジェクトの中には置かず ~/.ccdeck/attachments に落として、
+// その絶対パスを返す。会話にパスを書けば CLI が Read で読む（Claude Code / Codex とも）。
+const ATTACH_DIR = path.join(CONFIG_DIR, 'attachments');
+const ATTACH_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
+const ATTACH_MAX = 12 * 1024 * 1024;
+app.post('/api/files/upload', express.json({ limit: '20mb' }), wrap(async (req, res) => {
+  const ext = ATTACH_TYPES[req.body?.type];
+  if (!ext) throw new Error('画像（png / jpeg / gif / webp）だけ受け付けます');
+  const buf = Buffer.from(String(req.body?.data ?? ''), 'base64');
+  if (!buf.length) throw new Error('中身が空です');
+  if (buf.length > ATTACH_MAX) throw new Error('12MB までにしてください');
+  await fsSync.promises.mkdir(ATTACH_DIR, { recursive: true, mode: 0o700 });
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
+  const file = path.join(ATTACH_DIR, `${stamp}-${Math.random().toString(36).slice(2, 6)}.${ext}`);
+  await fsSync.promises.writeFile(file, buf, { mode: 0o600 });
+  auth.audit(req.who, 'files.upload', `${file} ${buf.length}`);
+  res.json({ path: file, bytes: buf.length });
+}));
+
 // ---- WebSocket ----
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
@@ -289,6 +308,29 @@ function announceOwner(id) {
       cols: session?.cols, rows: session?.rows,
     });
   }
+}
+
+// 持ち主の切り替えが 3 秒に 6 回を超えたら嵐。窓が二つあるだけで起きうる
+// （通知 → 測り直し → resize → 持ち主交代 → 通知 …）。画面側も送り返さないよう直したが、
+// 古い画面が繋がっていても PTY を守れるよう、こちらでも受け付けを止める。
+const STORM_WINDOW_MS = 3000;
+const STORM_MAX = 6;
+const switches = new Map();   // sessionId -> 切り替えた時刻の並び
+let stormWarned = 0;
+
+function sizeStorm(id) {
+  const now = Date.now();
+  const log = (switches.get(id) ?? []).filter((at) => now - at < STORM_WINDOW_MS);
+  if (log.length >= STORM_MAX) {
+    if (now - stormWarned > 30_000) {
+      stormWarned = now;
+      console.warn(`画面サイズの持ち主が入れ替わり続けています（${id}）。ccdeck の窓が複数開いていませんか`);
+    }
+    return true;
+  }
+  log.push(now);
+  switches.set(id, log);
+  return false;
 }
 
 function setOwner(id, ws) {
@@ -404,15 +446,27 @@ wss.on('connection', (ws) => {
         // 止めたいのは、小さな画面で覗いている相手（スマホ）が PC の画面を
         // 45 桁に潰してしまうことだけ。覗き見は claimSize で奪ってからでないと変えられない。
         if (peek.has(msg.id) && owners.get(msg.id) !== ws) break;
-        if (owners.get(msg.id) !== ws) setOwner(msg.id, ws);
-        session.resize(msg.cols, msg.rows);
+        const cols = Number(msg.cols);
+        const rows = Number(msg.rows);
+        if (!cols || !rows) break;
+        if (owners.get(msg.id) !== ws) {
+          // 持ち主の切り替えが短時間に続くのは、窓どうしの往復。嵐の間は切り替えない
+          if (sizeStorm(msg.id)) break;
+          setOwner(msg.id, ws);
+        }
+        // 同じ桁数なら PTY に触らない（触れば TUI が描き直す）
+        if (cols !== session.cols || rows !== session.rows) session.resize(cols, rows);
         break;
       }
       case 'claimSize': {
         if (!session) break;
+        const cols = Number(msg.cols);
+        const rows = Number(msg.rows);
+        if (!cols || !rows) break;
+        if (owners.get(msg.id) !== ws && sizeStorm(msg.id)) break;
         setOwner(msg.id, ws);
-        session.resize(msg.cols, msg.rows);
-        auth.audit(ws.who, 'size.claim', `${session.cwd} ${msg.cols}x${msg.rows}`);
+        if (cols !== session.cols || rows !== session.rows) session.resize(cols, rows);
+        auth.audit(ws.who, 'size.claim', `${session.cwd} ${cols}x${rows}`);
         break;
       }
       case 'releaseSize': {
