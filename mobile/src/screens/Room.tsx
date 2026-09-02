@@ -1,51 +1,87 @@
-import { useEffect, useRef, useState } from 'react';
-import * as ImagePicker from 'expo-image-picker';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { WebView } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { DeckState, WatchMode } from '../deck';
-import { C, DOT, MONO, relTime, stateColor, STATE_LABEL } from '../theme';
 import * as api from '../api';
-import { Frame, Label, PixButton, PixelSprite, SelectableText, TopBar } from '../ui/Pixel';
-import type { Link } from '../types';
-import type { Session, Turn } from '../types';
+import type { DeckState, WatchMode } from '../deck';
+import { renderMarkdown } from '../markdown';
+import { keysFor, parsePrompt, type PromptOption } from '../prompt';
+import { CHAT_HTML } from '../scene/chatHtml';
+import { C, DOT, relTime, stateColor, STATE_LABEL } from '../theme';
+import { Frame, Label, PixButton, PixelSprite, TopBar } from '../ui/Pixel';
+import type { Link, Session } from '../types';
 
 type Tab = 'chat' | 'screen';
 type Props = { session: Session; deck: DeckState; link: Link; onBack: () => void };
 
 const ESC = String.fromCharCode(27);
 const CTRL_C = String.fromCharCode(3);
+const KEY_GAP_MS = 90;
 const KEYS: [string, string][] = [
   ['Esc', ESC], ['Tab', '\t'], ['↑', `${ESC}[A`], ['↓', `${ESC}[B`],
   ['←', `${ESC}[D`], ['→', `${ESC}[C`], ['⏎', '\r'], ['^C', CTRL_C],
 ];
 
-/* 住人の部屋。会話を読み、下の欄から話しかける。
-   呼ばれているとき（承認待ち）は、いまの画面から問いの箱を切り出して見せ、
-   承認 / 1 2 3 / Esc を押せるようにする。外出中にやりたいことの九割はこれ。 */
+/* 住人の部屋。会話と画面は WebView が描く（iOS の Text は一部だけ選んでコピーできず、
+   編集不可の TextInput は中身より高い枠を取って空白が空く。どちらも実際にそうなった）。
+   入力・キーバー・選択肢はネイティブのまま。 */
 export default function Room({ session, deck, link, onBack }: Props) {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>('chat');
   const [draft, setDraft] = useState('');
-  const scroll = useRef<ScrollView>(null);
-  const callScroll = useRef<ScrollView>(null);
-  const stick = useRef(true);
+  const [attaching, setAttaching] = useState(false);
+  const [note, setNote] = useState('');
+  const web = useRef<WebView>(null);
+  const ready = useRef(false);
 
   const chat = deck.chats[session.id];
   const screen = deck.screens[session.id];
   const calling = session.status === 'attention';
+  const legacy = deck.chatOk === false;
 
   // 見る形。呼ばれているときは画面（問いの箱）を取る。ただし会話をまだ受け取っていなければ先に会話。
-  // 古いサーバー（会話を返せない）なら常に画面。
-  const legacy = deck.chatOk === false;
   const mode: WatchMode = legacy || tab === 'screen' || (calling && chat !== undefined) ? 'text' : 'chat';
   useEffect(() => { deck.watch(session.id, mode); }, [session.id, mode]);
   useEffect(() => () => deck.watch(null), []);
 
+  const prompt = useMemo(() => (calling ? parsePrompt(screen) : null), [calling, screen]);
+  const agentName = session.agent === 'codex' ? 'CODEX' : 'CLAUDE';
+
+  const push = (payload: any) => web.current?.postMessage(JSON.stringify(payload));
+  const paint = () => {
+    if (!ready.current) return;
+    if (tab === 'screen' || legacy) {
+      push({ t: 'screen', text: screen === undefined ? '画面を受け取っています…' : (screen.replace(/\s+$/, '') || '（まだ何も描かれていません）') });
+      return;
+    }
+    if (chat === undefined) return push({ t: 'hint', text: '会話を受け取っています…' });
+    push({
+      t: 'chat',
+      empty: 'まだ会話がありません。下から話しかけられます。',
+      turns: chat.map((turn) => ({
+        who: turn.role === 'user' ? 'あなた' : agentName,
+        me: turn.role === 'user',
+        html: turn.text ? renderMarkdown(turn.text) : '',
+        tools: turn.tools ?? [],
+      })),
+    });
+  };
+  useEffect(paint, [chat, screen, tab, legacy]);
+
   const key = (seq: string) => deck.sendKey(session.id, seq);
-  const [attaching, setAttaching] = useState(false);
-  const [note, setNote] = useState('');
+  const press = (option: PromptOption) => {
+    if (!prompt) return;
+    keysFor(prompt, option).forEach((seq, i) => setTimeout(() => key(seq), i * KEY_GAP_MS));
+  };
+  const submit = () => {
+    const text = draft.replace(/\s+$/, '');
+    if (!text) return;
+    deck.sendText(session.id, text);
+    setDraft('');
+  };
 
   /* 画像を Mac に送り、そのパスを文章に差し込む。CLI はパスを見れば Read で読む。
      写真は JPEG に詰め直して送る（HEIC のままだと読めない）。 */
@@ -68,19 +104,6 @@ export default function Room({ session, deck, link, onBack }: Props) {
       setAttaching(false);
     }
   };
-  const submit = () => {
-    const text = draft.replace(/\s+$/, '');
-    if (!text) return;
-    deck.sendText(session.id, text);
-    setDraft('');
-    stick.current = true;
-  };
-
-  const tail = calling ? promptTail(screen) : [];
-  // 「このフォルダを信頼しますか」は既定が「No, exit」。Enter だけ押すと落ちるので、専用の近道を出す
-  const trust = calling && /trust this folder|Is this a project you/i.test(screen ?? '');
-  const trustAndOpen = () => { key(`${ESC}[B`); setTimeout(() => key('\r'), 150); };
-  const agentName = session.agent === 'codex' ? 'CODEX' : 'CLAUDE';
 
   return (
     <KeyboardAvoidingView
@@ -108,8 +131,7 @@ export default function Room({ session, deck, link, onBack }: Props) {
         right={(
           <View style={s.tabs}>
             {(['chat', 'screen'] as Tab[]).map((t) => (
-              <Pressable key={t} onPress={() => setTab(t)} hitSlop={6}
-                style={[s.tab, tab === t && s.tabOn]}>
+              <Pressable key={t} onPress={() => setTab(t)} hitSlop={6} style={[s.tab, tab === t && s.tabOn]}>
                 <Text style={[s.tabText, tab === t && { color: C.text }]}>{t === 'chat' ? '会話' : '画面'}</Text>
               </Pressable>
             ))}
@@ -117,73 +139,75 @@ export default function Room({ session, deck, link, onBack }: Props) {
         )}
       />
 
+      {/* モデルはここに出す。押すと CLI の /model を開き、選択肢として下に並ぶ */}
+      <Pressable style={s.modelRow} onPress={() => deck.sendText(session.id, '/model')} hitSlop={6}>
+        <Label>モデル</Label>
+        <Text style={s.modelName} numberOfLines={1}>{session.model || '（まだ判りません）'}</Text>
+        <Text style={s.modelHint}>切り替える ▸</Text>
+      </Pressable>
+
       {!deck.up ? <Text style={s.down}>切断中。繋がると続きが届きます</Text> : null}
+      {legacy ? <Text style={s.legacy}>このサーバーは会話の形で返せません。画面の文字で表示しています</Text> : null}
 
-      {legacy && tab === 'chat' ? (
-        <Text style={s.legacy}>このサーバーは会話の形で返せません。画面の文字で表示しています（サーバーを新しくすると直ります）</Text>
-      ) : null}
+      <WebView
+        ref={web}
+        source={{ html: CHAT_HTML }}
+        originWhitelist={['*']}
+        style={s.fill}
+        containerStyle={s.fill}
+        onMessage={(e) => {
+          let m: any;
+          try { m = JSON.parse(e.nativeEvent.data); } catch { return; }
+          if (m.t === 'ready') { ready.current = true; paint(); }
+          else if (m.t === 'error') console.warn('[chat]', m.msg);
+        }}
+        javaScriptEnabled
+        bounces={false}
+        overScrollMode="never"
+        hideKeyboardAccessoryView
+        keyboardDisplayRequiresUserAction={false}
+      />
 
-      {tab === 'chat' && !legacy ? (
-        <ScrollView
-          ref={scroll}
-          style={s.fill}
-          contentContainerStyle={s.chatBody}
-          onScroll={(e) => {
-            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-            stick.current = contentSize.height - (contentOffset.y + layoutMeasurement.height) < 80;
-          }}
-          scrollEventThrottle={100}
-          onContentSizeChange={() => { if (stick.current) scroll.current?.scrollToEnd({ animated: false }); }}
-          keyboardShouldPersistTaps="handled"
-        >
-          {chat === undefined ? <Text style={s.hint}>会話を受け取っています…</Text> : null}
-          {chat && chat.length === 0 ? <Text style={s.hint}>まだ会話がありません。下から話しかけられます。</Text> : null}
-          {(chat ?? []).map((turn, i) => <TurnView key={i} turn={turn} agent={agentName} />)}
-        </ScrollView>
-      ) : (
-        <ScrollView style={s.fill} contentContainerStyle={s.screenBody}>
-          <ScrollView horizontal showsHorizontalScrollIndicator>
-            <SelectableText
-              style={s.screenText}
-              text={screen === undefined ? '画面を受け取っています…' : (screen.replace(/\s+$/, '') || '（まだ何も描かれていません）')}
-            />
-          </ScrollView>
-        </ScrollView>
-      )}
-
-      {calling && tab === 'chat' ? (
+      {calling ? (
         <Frame accent style={s.call}>
-          <View style={s.callHead}>
-            <Label color={C.amber}>呼んでいます</Label>
-            <Text style={s.callHint}>{session.cols}×{session.rows} の画面から切り出し</Text>
-          </View>
-          <ScrollView
-            ref={callScroll}
-            style={s.callScroll}
-            nestedScrollEnabled
-            onContentSizeChange={() => callScroll.current?.scrollToEnd({ animated: false })}
-          >
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <SelectableText
-                style={s.callText}
-                text={tail.length ? tail.join('\n') : (screen === undefined ? '画面を受け取っています…' : '（問いの箱が見つかりません。「画面」で全体を確かめてください）')}
-              />
-            </ScrollView>
-          </ScrollView>
+          {prompt ? (
+            <>
+              {prompt.question.length ? (
+                <ScrollView style={s.question} nestedScrollEnabled>
+                  <Text style={s.questionText} selectable>{prompt.question.join('\n')}</Text>
+                </ScrollView>
+              ) : null}
+              <ScrollView style={s.options} nestedScrollEnabled>
+                {prompt.options.map((option) => (
+                  <Pressable
+                    key={option.index}
+                    onPress={() => press(option)}
+                    style={({ pressed }) => [s.option, option.selected && s.optionOn, pressed && s.optionPressed]}
+                  >
+                    <Text style={[s.optionLabel, option.selected && { color: C.amber }]}>
+                      {option.number !== null ? `${option.number}. ` : ''}{option.label}
+                    </Text>
+                    {option.detail ? <Text style={s.optionDetail} numberOfLines={2}>{option.detail}</Text> : null}
+                  </Pressable>
+                ))}
+              </ScrollView>
+              <View style={s.callFoot}>
+                <PixButton label="やめる Esc" tone="ghost" onPress={() => key(ESC)} />
+              </View>
+            </>
+          ) : (
+            <>
+              <Label color={C.amber}>呼んでいます</Label>
+              <Text style={s.note}>
+                {screen === undefined ? '画面を受け取っています…' : '選択肢を読み取れません。「画面」で全体を見てから、下のキーで答えてください。'}
+              </Text>
+              <View style={s.callFoot}>
+                <PixButton label="決定 ⏎" tone="amber" onPress={() => key('\r')} />
+                <PixButton label="やめる Esc" onPress={() => key(ESC)} />
+              </View>
+            </>
+          )}
         </Frame>
-      ) : null}
-
-      {calling && trust ? (
-        <View style={s.quick}>
-          <PixButton label="信頼して開く" tone="amber" wide onPress={trustAndOpen} />
-          <PixButton label="やめる Esc" onPress={() => key(ESC)} />
-        </View>
-      ) : calling ? (
-        <View style={s.quick}>
-          <PixButton label="承認 ⏎" tone="amber" wide onPress={() => key('\r')} />
-          {['1', '2', '3'].map((n) => <PixButton key={n} label={n} onPress={() => key(n)} style={s.num} />)}
-          <PixButton label="Esc" onPress={() => key(ESC)} />
-        </View>
       ) : null}
 
       <View style={s.keys}>
@@ -214,56 +238,6 @@ export default function Room({ session, deck, link, onBack }: Props) {
   );
 }
 
-/* いまの画面から、問いの箱（承認ダイアログや選択肢）を切り出す。
-   問いの行（Do you want / ❯ 1. など）を末尾から探し、その少し上から下端までを取る。
-   箱の上辺（╭）が近くにあればそこから。罫線を落として文字だけにする。
-   見つからなければ末尾 14 行。長いときは末尾が見えるように出す側で下へ寄せる。 */
-const ASK = /Do you want|Would you like|Choose an option|❯\s*\d\.|\b1\.\s*Yes\b|Press Enter to continue|Enter to select/i;
-export function promptTail(screen?: string): string[] {
-  if (!screen) return [];
-  const lines = screen.split('\n');
-  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
-  let start = Math.max(0, lines.length - 14);
-  for (let i = lines.length - 1; i >= 0 && i >= lines.length - 40; i--) {
-    if (!ASK.test(lines[i])) continue;
-    start = Math.max(0, i - 8);
-    for (let j = i; j >= start; j--) if (/[╭┌]/.test(lines[j])) { start = j; break; }
-    break;
-  }
-  return lines.slice(start)
-    .map((l) => l.replace(/^[\s│┃|]+/, '').replace(/[\s│┃|]+$/, ''))
-    .filter((l) => l && !/^[─━╭╮╰╯┌┐└┘┬┴\s]+$/.test(l));
-}
-
-const CLIP_HEAD = 700;
-const CLIP_TAIL = 900;
-function clip(text: string): string {
-  if (text.length <= CLIP_HEAD + CLIP_TAIL + 40) return text;
-  return `${text.slice(0, CLIP_HEAD)}\n…（途中を省きました）…\n${text.slice(-CLIP_TAIL)}`;
-}
-
-function TurnView({ turn, agent }: { turn: Turn; agent: string }) {
-  const me = turn.role === 'user';
-  const tools = turn.tools ?? [];
-  return (
-    <View style={[t.turn, me && t.mine]}>
-      <Text style={[t.who, me && { color: C.amber }]}>{me ? 'あなた' : agent}</Text>
-      {turn.text ? <SelectableText text={clip(turn.text)} style={[t.body, me && t.bodyMine]} /> : null}
-      {tools.slice(0, 5).map((x, i) => <Text key={i} style={t.tool} numberOfLines={1}>▸ {x}</Text>)}
-      {tools.length > 5 ? <Text style={t.tool}>▸ …あと {tools.length - 5}</Text> : null}
-    </View>
-  );
-}
-
-const t = StyleSheet.create({
-  turn: { paddingVertical: 8, paddingRight: 4 },
-  mine: { borderLeftWidth: 2, borderLeftColor: C.amber, paddingLeft: 10, marginLeft: 2 },
-  who: { color: C.faint, fontFamily: DOT, fontSize: 11, letterSpacing: 1, marginBottom: 4 },
-  body: { color: C.text, fontFamily: DOT, fontSize: 15, lineHeight: 23 },
-  bodyMine: { color: C.dim },
-  tool: { color: C.faint, fontFamily: DOT, fontSize: 12, marginTop: 3 },
-});
-
 const s = StyleSheet.create({
   fill: { flex: 1, backgroundColor: C.bg },
   back: { color: C.dim, fontFamily: DOT, fontSize: 14 },
@@ -274,21 +248,27 @@ const s = StyleSheet.create({
   tab: { paddingHorizontal: 8, paddingVertical: 4 },
   tabOn: { backgroundColor: C.raised },
   tabText: { color: C.faint, fontFamily: DOT, fontSize: 12 },
+  modelRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 14, paddingVertical: 6,
+    borderTopWidth: 1, borderBottomWidth: 1, borderColor: C.lineSoft,
+  },
+  modelName: { flex: 1, color: C.text, fontFamily: DOT, fontSize: 13 },
+  modelHint: { color: C.faint, fontFamily: DOT, fontSize: 11 },
   down: { color: C.dead, fontFamily: DOT, fontSize: 12, paddingHorizontal: 16, paddingVertical: 6 },
   legacy: { color: C.faint, fontFamily: DOT, fontSize: 11, paddingHorizontal: 16, paddingVertical: 4 },
-  chatBody: { paddingHorizontal: 14, paddingTop: 6, paddingBottom: 12 },
-  hint: { color: C.faint, fontFamily: DOT, fontSize: 13, paddingVertical: 12 },
-  screenBody: { padding: 10 },
-  screenText: { color: C.text, fontFamily: MONO, fontSize: 10, lineHeight: 14 },
-  call: { marginHorizontal: 10, marginBottom: 8, paddingHorizontal: 10, paddingVertical: 8 },
-  callHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 },
-  callHint: { color: C.faint, fontFamily: DOT, fontSize: 10 },
-  callScroll: { maxHeight: 170 },
-  callText: { color: C.text, fontFamily: MONO, fontSize: 11, lineHeight: 16 },
-  quick: { flexDirection: 'row', gap: 6, paddingHorizontal: 10, paddingBottom: 6 },
-  num: { minWidth: 44 },
-  attach: { paddingHorizontal: 6, minHeight: 40 },
-  keys: { flexDirection: 'row', gap: 4, paddingHorizontal: 10, paddingBottom: 6 },
+  call: { marginHorizontal: 10, marginBottom: 8, paddingHorizontal: 10, paddingVertical: 8, maxHeight: 320 },
+  question: { maxHeight: 96, marginBottom: 8 },
+  questionText: { color: C.text, fontFamily: DOT, fontSize: 13, lineHeight: 19 },
+  options: { maxHeight: 190 },
+  option: { paddingVertical: 7, paddingHorizontal: 8, borderLeftWidth: 2, borderLeftColor: 'transparent' },
+  optionOn: { borderLeftColor: C.amber, backgroundColor: C.raised },
+  optionPressed: { backgroundColor: C.raised },
+  optionLabel: { color: C.text, fontFamily: DOT, fontSize: 14, lineHeight: 20 },
+  optionDetail: { color: C.faint, fontFamily: DOT, fontSize: 11, lineHeight: 16, marginTop: 2 },
+  callFoot: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  note: { color: C.faint, fontFamily: DOT, fontSize: 12, lineHeight: 18, marginTop: 6 },
+  keys: { flexDirection: 'row', gap: 4, paddingHorizontal: 10, paddingTop: 6, paddingBottom: 6 },
   key: {
     flex: 1, height: 36, alignItems: 'center', justifyContent: 'center',
     borderWidth: 2, borderColor: C.frameLo, backgroundColor: C.panel,
@@ -299,6 +279,7 @@ const s = StyleSheet.create({
     flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 10, paddingTop: 4,
     borderTopWidth: 1, borderTopColor: C.lineSoft,
   },
+  attach: { paddingHorizontal: 6, minHeight: 40 },
   field: {
     flex: 1, minHeight: 40, maxHeight: 120, paddingHorizontal: 10, paddingVertical: 9,
     borderWidth: 2, borderColor: C.frameLo, backgroundColor: C.panel,

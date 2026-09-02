@@ -257,6 +257,14 @@ const broadcast = (payload) => {
 manager.on('sessions', () => broadcast({ type: 'sessions', sessions: manager.list() }));
 butler.on('change', () => broadcast({ type: 'butler', state: butler.toJSON() }));
 
+// /model で切り替えた直後に表示が追いつくよう、状態が落ち着いたら読み直す。
+// 記録が変わっていなければ読まないので、続けて呼ばれても重くならない。
+let modelTimer = null;
+manager.on('sessions', () => {
+  clearTimeout(modelTimer);
+  modelTimer = setTimeout(() => revive.refresh(manager), 2500);
+});
+
 // 外部セッションは Claude Code が書く状態ファイルを見張る。
 // 変化がなければ何も流さないので、開きっぱなしでも負荷にならない。
 let lastExternal = '';

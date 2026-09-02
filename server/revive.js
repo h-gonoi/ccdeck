@@ -9,7 +9,7 @@ import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { CONFIG_DIR } from './projects.js';
 import { AGENT_COMMANDS } from './sessions.js';
-import { procChildren, resumeAvailable, vendorSessionId } from './transcripts.js';
+import { modelFor, procChildren, resumeAvailable, vendorSessionId } from './transcripts.js';
 
 export const LEDGER_PATH = path.join(CONFIG_DIR, 'sessions.json');
 // 事故のとき手で控えたものを一度だけ拾うための口。取り込んだら .imported に退ける。
@@ -104,8 +104,9 @@ export async function takePending() {
 }
 
 /**
- * 会話 ID を読み直す。ps は 1 回で済ませる。
+ * 会話 ID とモデルを読み直す。ps は 1 回で済ませる。
  * 起動直後のセッションはまだ ID を持っていないので、取れなくても消さない。
+ * モデルが変わったら meta を出す（画面の表示が追いつくように）。
  */
 export function refresh(manager) {
   const sessions = [...manager.sessions.values()].filter((s) => s.exitCode === null);
@@ -114,6 +115,11 @@ export function refresh(manager) {
   for (const session of sessions) {
     const id = vendorSessionId(session, children);
     if (id) session.vendorId = id;
+    const model = modelFor(session);
+    if (model && model !== session.model) {
+      session.model = model;
+      session.emit('meta');
+    }
   }
 }
 

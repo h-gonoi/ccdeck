@@ -356,6 +356,43 @@ function turnsCodex(file, limit) {
   return turns.slice(-limit);
 }
 
+/* いま使っているモデル。CLI が記録に書いた最後の "model" を拾う。
+   記録が変わっていなければ読み直さない（状態が変わるたびに数百 KB 読むのは重い）。 */
+const modelCache = new Map();   // file -> { key, model }
+const MODEL_TAIL = 64 * 1024;
+
+// claude-fable-5-1 → Fable 5.1。CLI が自分の画面に出すのと同じ書き方に寄せる。
+// 当てはまらないものはそのまま返す（gpt-5.6-sol など）。
+export function prettyModel(id) {
+  if (!id) return null;
+  const m = String(id).match(/^claude-([a-z]+)-(\d+(?:-\d+)*)(?:-\d{8})?$/);
+  if (!m) return String(id);
+  return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2].replace(/-/g, '.')}`;
+}
+
+export function modelFor(session) {
+  try {
+    const file = session.agent === 'claude' ? claudeTranscript(session) : codexTranscript(session);
+    if (!file) return null;
+    const stat = fs.statSync(file);
+    const key = `${stat.size}:${stat.mtimeMs}`;
+    const hit = modelCache.get(file);
+    if (hit && hit.key === key) return hit.model;
+    const text = readTail(file, MODEL_TAIL);
+    let model = null;
+    const re = /"model"\s*:\s*"([^"]+)"/g;
+    let m;
+    // <synthetic> のような差し込みは本当のモデルではない。飛ばす
+    while ((m = re.exec(text))) if (!m[1].startsWith('<')) model = m[1];
+    const label = prettyModel(model);
+    if (modelCache.size > 64) modelCache.clear();
+    modelCache.set(file, { key, model: label });
+    return label;
+  } catch {
+    return null;
+  }
+}
+
 export function conversationFor(session, limit = 24) {
   try {
     const file = session.agent === 'claude' ? claudeTranscript(session) : codexTranscript(session);
