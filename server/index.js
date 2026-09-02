@@ -13,6 +13,7 @@ import { listExternal, focusTty } from './external.js';
 import * as auth from './auth.js';
 import * as revive from './revive.js';
 import { conversationFor } from './transcripts.js';
+import { createButler } from './butler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.CCDECK_PORT) || 7788;
@@ -29,6 +30,7 @@ app.use(express.json({ limit: '8mb' }));
 app.use(express.static(path.join(__dirname, '..', 'dist')));
 
 const manager = new SessionManager();
+const butler = createButler({ manager });
 
 // 起動時に前回の続きを起こした結果。画面に一度だけ伝えるために持っておく。
 const revived = { total: 0, resumed: 0, dropped: 0 };
@@ -70,7 +72,7 @@ app.get('/api/health', (req, res) => res.json({
   address: LAN ? auth.lanAddress() : '127.0.0.1',
   port: PORT,
   agents: Object.keys(AGENT_COMMANDS),
-  capabilities: ['sessions', 'external', 'git', 'files', 'pair'],
+  capabilities: ['sessions', 'external', 'git', 'files', 'pair', 'butler'],
 }));
 
 // ---- 端末 ----
@@ -130,11 +132,33 @@ app.post('/api/sessions/:id/read', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- 執事 ----
+// 見立ては読み取り専用の一回きり実行。手順を渡すのは承認のあとだけ。
+// cwd は既存のディレクトリに限る（セッション作成と同じ境界。LAN からも同じ）。
+app.get('/api/butler', (req, res) => res.json(butler.toJSON()));
+app.post('/api/butler/assess', wrap(async (req, res) => {
+  const cwds = Array.isArray(req.body?.cwds) ? req.body.cwds : [];
+  auth.audit(req.who, 'butler.assess', cwds.join(' '));
+  res.json(butler.assess({ cwds, agent: req.body?.agent }));
+}));
+app.post('/api/butler/approve', wrap(async (req, res) => {
+  auth.audit(req.who, 'butler.approve', req.body?.planId ?? '');
+  res.json(butler.approve(req.body ?? {}));
+}));
+app.post('/api/butler/cancel', wrap(async (req, res) => {
+  auth.audit(req.who, 'butler.cancel', '');
+  res.json(butler.cancel());
+}));
+app.post('/api/butler/dismiss', wrap(async (req, res) => res.json(butler.dismiss())));
+app.post('/api/butler/step', wrap(async (req, res) => res.json(butler.editStep(req.body ?? {}))));
+app.post('/api/butler/config', wrap(async (req, res) => res.json(butler.configure(req.body ?? {}))));
+
 // ---- 他で動いているセッション ----
 // ccdeck が spawn したシェルの PID。この子孫は「外部」から除く。
-const ownPids = () => new Set(
-  [...manager.sessions.values()].map((s) => s.pty?.pid).filter(Boolean)
-);
+const ownPids = () => new Set([
+  ...[...manager.sessions.values()].map((s) => s.pty?.pid).filter(Boolean),
+  ...butler.childPids(),   // 執事の見立て（claude -p）も自分のもの
+]);
 
 app.get('/api/external', wrap(async (req, res) => res.json(await listExternal(ownPids()))));
 
@@ -212,6 +236,7 @@ const broadcast = (payload) => {
 };
 
 manager.on('sessions', () => broadcast({ type: 'sessions', sessions: manager.list() }));
+butler.on('change', () => broadcast({ type: 'butler', state: butler.toJSON() }));
 
 // 外部セッションは Claude Code が書く状態ファイルを見張る。
 // 変化がなければ何も流さないので、開きっぱなしでも負荷にならない。
@@ -297,6 +322,7 @@ wss.on('connection', (ws) => {
   const send = (payload) => { if (ws.readyState === 1) ws.send(JSON.stringify(payload)); };
   send({ type: 'hello', buildId: BUILD_ID, revived });
   send({ type: 'sessions', sessions: manager.list() });
+  send({ type: 'butler', state: butler.toJSON() });
   listExternal(ownPids()).then((list) => send({ type: 'external', sessions: list })).catch(() => {});
 
   const detach = (id) => {
@@ -454,6 +480,7 @@ server.listen(PORT, HOST, () => {
 // killAll より先に書くこと（会話 ID は CLI が生きている間しか引けない）。
 const shutdown = () => {
   revive.saveSync(manager);
+  butler.shutdown();
   manager.killAll();
   process.exit(0);
 };

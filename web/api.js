@@ -35,6 +35,14 @@ export const api = {
   devices: () => request('/api/devices'),
   revokeDevice: (id) => request(`/api/devices/${id}`, { method: 'DELETE' }),
 
+  butler: () => request('/api/butler'),
+  butlerAssess: (cwds, agent) => post('/api/butler/assess', { cwds, agent }),
+  butlerApprove: (body) => post('/api/butler/approve', body),
+  butlerCancel: () => post('/api/butler/cancel', {}),
+  butlerDismiss: () => post('/api/butler/dismiss', {}),
+  butlerStep: (body) => post('/api/butler/step', body),
+  butlerConfig: (body) => post('/api/butler/config', body),
+
   readFile: (cwd, path) =>
     request(`/api/files/read?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}`),
   writeFile: (cwd, path, content) => post('/api/files/write', { cwd, path, content }),

@@ -25,6 +25,10 @@ const state = {
   pairCode: null,        // { code, expiresAt } 出している間だけ
   confirmRevoke: null,   // 失効確認を出している端末
   handoffBusy: false,
+  butler: null,          // 執事の状態。無ければ節を出さない（古いサーバー）
+  butlerPick: null,      // 見立てに出すプロジェクト（cwd の Set）。null は未選択＝既定
+  butlerOpen: new Set(), // 提案で本文を開いている手順 "cwd#index"
+  butlerEdit: null,      // 書き換え中の手順 "cwd#index"
 };
 
 // ＋ から出すプロジェクト選び。開いている間だけ使う状態。
@@ -52,6 +56,7 @@ function connect() {
     else if (msg.type === 'snapshot') pool.replay(msg.id, msg.data);
     else if (msg.type === 'output') pool.write(msg.id, msg.data);
     else if (msg.type === 'sizeOwner') onSizeOwner(msg);
+    else if (msg.type === 'butler') onButler(msg.state);
   };
   ws.onopen = () => { attached.clear(); needResync = true; };
   ws.onclose = () => setTimeout(connect, 1200); // サーバー再起動に自力で追従する
@@ -108,6 +113,7 @@ const pool = new TerminalPool($('terms'), {
 let previousStates = new Map();
 
 function onSessions(sessions) {
+  if (state.butler) queueMicrotask(renderButler);
   // 「実行中だったものが要対応になった」瞬間だけ通知する
   for (const s of sessions) {
     const before = previousStates.get(s.id);
@@ -889,6 +895,220 @@ async function revokeDevice(device) {
   renderMobile();
 }
 
+// ---------- 執事 ----------
+// 見立て（提案）→ 承認 → 実行、を左レールの中で回す。モーダルは出さない。
+// 琥珀は「承認を待っている」ときだけ。走っている間は控えめに。
+const PLAN_LABEL = {
+  assessing: '見立て中', proposed: '承認待ち', running: '進めています', done: '一巡',
+  failed: '失敗', cancelled: '止めた', paused: '止まっている',
+};
+const STEP_MARK = { pending: '·', sent: '▶', done: '✓', skipped: '–', failed: '×' };
+
+function onButler(next) {
+  const before = state.butler?.plan?.state;
+  state.butler = next;
+  const after = next?.plan?.state;
+  // 提案が届いた瞬間だけ知らせる（PC の通知は「自分の番」にだけ使う）
+  if (after === 'proposed' && before !== 'proposed') {
+    toast('執事から提案があります');
+    if (document.hidden && Notification.permission === 'granted') {
+      new Notification('ccdeck · 執事', { body: 'ご提案があります' });
+    }
+  }
+  renderButler();
+}
+
+// 見立てに出す既定の候補：いま開いているプロジェクト。無ければ最近使った上位。
+function butlerCandidates() {
+  const live = new Set(state.sessions.filter((s) => s.status !== 'exited').map((s) => s.cwd));
+  const list = state.projects.filter((p) => live.has(p.path));
+  for (const p of state.projects) {
+    if (list.length >= 8) break;
+    if (!list.includes(p)) list.push(p);
+  }
+  return { list, live };
+}
+
+function renderButler() {
+  const section = $('butler-head');
+  const b = state.butler;
+  if (!b) { section.hidden = true; return; }
+  section.hidden = false;
+
+  const plan = b.plan;
+  $('btn-butler-agent').textContent = b.agent === 'codex' ? 'Codex' : 'Claude';
+  $('btn-butler-agent').disabled = Boolean(b.busy);
+  const count = $('butler-count');
+  count.textContent = plan ? PLAN_LABEL[plan.state] ?? plan.state : '';
+  count.classList.toggle('butler__count--call', plan?.state === 'proposed');
+
+  const body = $('butler-body');
+  body.innerHTML = '';
+  const el = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  const button = (label, onClick, className = 'ghost-btn') => {
+    const btn = el('button', className, label);
+    btn.onclick = onClick;
+    return btn;
+  };
+
+  if (!plan) {
+    const { list, live } = butlerCandidates();
+    if (!state.butlerPick) state.butlerPick = new Set(list.filter((p) => live.has(p.path)).map((p) => p.path));
+    if (!list.length) {
+      body.appendChild(el('p', 'butler__note', 'プロジェクトが見つかりません。上の「プロジェクト」に出てから頼めます。'));
+      return;
+    }
+    const picks = el('ul', 'butler__picks');
+    for (const p of list) {
+      const li = el('li', 'butler__pick');
+      const box = el('input');
+      box.type = 'checkbox';
+      box.checked = state.butlerPick.has(p.path);
+      box.onchange = () => { box.checked ? state.butlerPick.add(p.path) : state.butlerPick.delete(p.path); renderButler(); };
+      const name = el('span', 'butler__pickName', p.name);
+      li.append(box, name);
+      if (live.has(p.path)) li.appendChild(el('span', 'butler__pickLive', '開いている'));
+      li.onclick = (event) => { if (event.target !== box) { box.checked = !box.checked; box.onchange(); } };
+      picks.appendChild(li);
+    }
+    body.appendChild(picks);
+    const actions = el('div', 'butler__actions');
+    const go = button(`見立てを頼む（${state.butlerPick.size}）`, async () => {
+      try { await api.butlerAssess([...state.butlerPick], b.agent); }
+      catch (err) { toast(err.message); }
+    });
+    go.disabled = state.butlerPick.size === 0;
+    actions.appendChild(go);
+    body.appendChild(actions);
+    body.appendChild(el('p', 'butler__note',
+      `執事が各プロジェクトを読み取り専用で見て回り、次に渡す手順を提案します。手順が動くのは承認のあとだけです。頭脳は ${b.agent === 'codex' ? 'Codex' : `Claude（${b.models.claude}）`}。`));
+    return;
+  }
+
+  // ---- 提案・実行の一覧 ----
+  for (const item of plan.items) {
+    const box = el('div', `butler__item butler__item--${item.state}`);
+    const head = el('div', 'butler__itemHead');
+    const name = el('button', 'butler__itemName', item.title);
+    name.title = item.cwd;
+    name.onclick = () => {
+      const s = state.sessions.find((x) => x.id === item.sessionId) ?? state.sessions.find((x) => x.cwd === item.cwd);
+      if (s) selectSession(s.id); else toast('まだセッションはありません');
+    };
+    head.appendChild(name);
+    head.appendChild(el('span', 'butler__itemState', {
+      assessing: '見立て中…', proposed: '', approved: '待機', running: `${item.steps.filter((x) => x.state === 'done').length}/${item.steps.filter((x) => x.state !== 'skipped').length}`,
+      done: '済', failed: '失敗', skipped: '見送り', paused: '停止',
+    }[item.state] ?? ''));
+    box.appendChild(head);
+
+    if (item.situation) box.appendChild(el('p', 'butler__situation', item.situation));
+    if (item.risk) box.appendChild(el('p', 'butler__risk', `⚠ ${item.risk}`));
+    if (item.error) box.appendChild(el('p', 'butler__risk', item.error));
+    if (item.state === 'proposed' && !item.steps.length) box.appendChild(el('p', 'butler__note', '渡す手順はありません。'));
+
+    const steps = el('ol', 'butler__steps');
+    item.steps.forEach((step, k) => {
+      const key = `${item.cwd}#${k}`;
+      const li = el('li', `butler__step butler__step--${step.state}`);
+      const row = el('div', 'butler__stepRow');
+      if (plan.state === 'proposed' || plan.state === 'paused') {
+        const check = el('input');
+        check.type = 'checkbox';
+        check.checked = step.state !== 'skipped';
+        // 承認前の見送りはこちらで持つ（サーバーには承認時にまとめて渡す）
+        check.onchange = () => { step.state = check.checked ? 'pending' : 'skipped'; renderButler(); };
+        row.appendChild(check);
+      } else {
+        row.appendChild(el('span', 'butler__mark', STEP_MARK[step.state] ?? '·'));
+      }
+      const title = el('button', 'butler__stepTitle', step.title);
+      title.onclick = () => { state.butlerOpen.has(key) ? state.butlerOpen.delete(key) : state.butlerOpen.add(key); renderButler(); };
+      row.appendChild(title);
+      li.appendChild(row);
+
+      if (state.butlerOpen.has(key)) {
+        if (state.butlerEdit === key) {
+          const area = el('textarea', 'butler__edit');
+          area.value = step.instruction;
+          area.rows = Math.min(12, step.instruction.split('\n').length + 2);
+          const save = async () => {
+            state.butlerEdit = null;
+            if (area.value.trim() === step.instruction) return renderButler();
+            try { await api.butlerStep({ planId: plan.id, cwd: item.cwd, index: k, instruction: area.value }); }
+            catch (err) { toast(err.message); renderButler(); }
+          };
+          area.onblur = save;
+          area.onkeydown = (event) => { if (event.key === 'Escape') { state.butlerEdit = null; renderButler(); } };
+          li.appendChild(area);
+          setTimeout(() => area.focus(), 0);
+        } else {
+          const text = el('pre', 'butler__instruction', step.instruction);
+          if (plan.state === 'proposed' || plan.state === 'paused') {
+            text.title = '押すと書き換えられます';
+            text.onclick = () => { state.butlerEdit = key; renderButler(); };
+          }
+          li.appendChild(text);
+        }
+      }
+      steps.appendChild(li);
+    });
+    if (item.steps.length) box.appendChild(steps);
+    body.appendChild(box);
+  }
+
+  if (plan.note) body.appendChild(el('p', 'butler__note', plan.note));
+
+  // ---- 動かすボタン ----
+  const actions = el('div', 'butler__actions');
+  if (plan.state === 'assessing' || plan.state === 'running') {
+    actions.appendChild(button('止める', () => api.butlerCancel().catch((err) => toast(err.message))));
+  }
+  if (plan.state === 'proposed' || plan.state === 'paused') {
+    const picks = {};
+    for (const item of plan.items) {
+      picks[item.cwd] = item.steps.map((s, k) => (s.state === 'skipped' || s.state === 'done' ? -1 : k)).filter((k) => k >= 0);
+    }
+    const total = Object.values(picks).reduce((n, list) => n + list.length, 0);
+    const approve = button(plan.state === 'paused' ? `続ける（${total}）` : `承認して進める（${total}）`, async () => {
+      try { await api.butlerApprove({ planId: plan.id, picks }); }
+      catch (err) { toast(err.message); }
+    }, 'ghost-btn butler__approve');
+    approve.disabled = total === 0;
+    actions.appendChild(approve);
+    actions.appendChild(button('見送る', () => api.butlerDismiss().catch((err) => toast(err.message))));
+  }
+  if (['done', 'failed', 'cancelled'].includes(plan.state)) {
+    actions.appendChild(button('次の見立てを頼む', async () => {
+      try { await api.butlerAssess(plan.items.map((i) => i.cwd), b.agent); }
+      catch (err) { toast(err.message); }
+    }));
+    actions.appendChild(button('閉じる', () => api.butlerDismiss().catch((err) => toast(err.message))));
+  }
+  body.appendChild(actions);
+
+  if (plan.log?.length) {
+    const log = el('ul', 'butler__log');
+    for (const entry of plan.log.slice(0, 4)) {
+      const li = el('li', 'butler__logLine');
+      li.append(el('span', 'butler__logAt', relTime(entry.at)), el('span', '', entry.text));
+      log.appendChild(li);
+    }
+    body.appendChild(log);
+  }
+}
+
+async function toggleButlerAgent() {
+  const next = state.butler?.agent === 'codex' ? 'claude' : 'codex';
+  try { await api.butlerConfig({ agent: next }); }
+  catch (err) { toast(err.message); }
+}
+
 function renderStage() {
   const session = state.sessions.find((s) => s.id === state.activeId);
   const tiled = state.panes.length > 1;
@@ -1083,6 +1303,7 @@ $('btn-rescan').onclick = async () => {
 };
 
 $('btn-pair').onclick = () => togglePairCode();
+$('btn-butler-agent').onclick = () => toggleButlerAgent();
 $('btn-rail').onclick = () => toggleRail();
 $('btn-tile').onclick = () => tileAll();
 $('stage-agent-claude').onclick = () => switchAgent('claude');
@@ -1168,5 +1389,6 @@ setInterval(() => { if (state.sessions.length) renderSessions(); }, 30000);
   connect();
   state.projects = sortProjects(await api.projects());
   renderProjects();
+  renderButler();   // プロジェクトが揃ってから候補を出す
   loadMobile();
 })();

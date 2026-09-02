@@ -293,6 +293,71 @@ button { font-family: inherit; cursor: pointer; }
   border-top: 1px solid var(--line-soft);
 }
 
+/* ---------- 執事 ---------- */
+/* 提案が届いたときだけ琥珀。走っている間は控えめに。 */
+.butler__brain {
+  margin-left: auto; font-size: 10.5px; letter-spacing: 0;
+}
+.butler__count--call { color: var(--amber); }
+.butler__body { padding: 0 var(--s-md) 0 20px; }
+.butler__note { margin: var(--s-sm) 0 0; color: var(--faint); font-size: 11px; line-height: 1.6; }
+.butler__picks { list-style: none; margin: var(--s-sm) 0 0; padding: 0; }
+.butler__pick {
+  display: flex; align-items: center; gap: var(--s-sm);
+  padding: 4px 0; color: var(--dim); font-size: 12px; cursor: pointer;
+}
+.butler__pick:hover { color: var(--text); }
+.butler__pick input { margin: 0; accent-color: var(--dim); }
+.butler__pickName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.butler__pickLive { font-size: 10px; color: var(--run); }
+.butler__actions { display: flex; gap: var(--s-sm); margin-top: var(--s-md); flex-wrap: wrap; }
+.butler__approve { border-color: var(--amber); color: var(--amber); background: var(--amber-soft); }
+.butler__approve:hover:not(:disabled) { background: rgba(224, 161, 69, 0.18); }
+.butler__actions button:disabled { opacity: 0.4; cursor: default; }
+
+.butler__item { margin-top: var(--s-md); padding-left: var(--s-sm); border-left: 2px solid var(--line); }
+.butler__item--running { border-left-color: var(--run); }
+.butler__item--failed { border-left-color: var(--dead); }
+.butler__item--done { border-left-color: var(--faint); }
+.butler__itemHead { display: flex; align-items: baseline; gap: var(--s-sm); }
+.butler__itemName {
+  background: none; border: none; padding: 0; color: var(--text); font-size: 12.5px; font-weight: 600;
+  text-align: left; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.butler__itemName:hover { color: var(--amber); }
+.butler__itemState { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--faint); }
+.butler__situation { margin: 4px 0 0; color: var(--dim); font-size: 11.5px; line-height: 1.55; }
+.butler__risk { margin: 4px 0 0; color: var(--dead); font-size: 11px; line-height: 1.5; }
+.butler__steps { list-style: none; margin: var(--s-sm) 0 0; padding: 0; }
+.butler__step { padding: 3px 0; }
+.butler__stepRow { display: flex; align-items: center; gap: var(--s-sm); }
+.butler__step input { margin: 0; accent-color: var(--dim); flex: none; }
+.butler__mark { flex: none; width: 12px; font-family: var(--mono); font-size: 11px; color: var(--faint); text-align: center; }
+.butler__step--sent .butler__mark { color: var(--run); }
+.butler__step--done .butler__mark { color: var(--dim); }
+.butler__step--skipped .butler__stepTitle { color: var(--faint); text-decoration: line-through; }
+.butler__stepTitle {
+  background: none; border: none; padding: 0; color: var(--dim); font-size: 12px; text-align: left;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+}
+.butler__stepTitle:hover { color: var(--text); }
+.butler__step--sent .butler__stepTitle { color: var(--text); }
+.butler__instruction {
+  margin: 4px 0 2px 20px; padding: var(--s-sm);
+  background: var(--panel); border: 1px solid var(--line-soft); border-radius: var(--radius);
+  color: var(--dim); font-family: var(--ui); font-size: 11px; line-height: 1.55;
+  white-space: pre-wrap; word-break: break-word; cursor: text;
+}
+.butler__edit {
+  display: block; width: calc(100% - 20px); margin: 4px 0 2px 20px; padding: var(--s-sm);
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  color: var(--text); font-family: var(--ui); font-size: 11px; line-height: 1.55; resize: vertical;
+}
+.butler__edit:focus { outline: none; border-color: var(--faint); }
+.butler__log { list-style: none; margin: var(--s-md) 0 0; padding: 0; }
+.butler__logLine { display: flex; gap: var(--s-sm); color: var(--faint); font-size: 10.5px; line-height: 1.6; }
+.butler__logAt { flex: none; font-family: var(--mono); font-size: 10px; width: 46px; }
+
 /* ---------- 中央 ---------- */
 .stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
 .stage__head {
