@@ -9,7 +9,8 @@
     "backgroundColor": "#131311",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "dev.ccdeck.mobile"
+      "bundleIdentifier": "dev.ccdeck.mobile",
+      "appleTeamId": "UVULXV8Z7Z"
     },
     "android": {
       "package": "dev.ccdeck.mobile",
@@ -24,7 +25,13 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "セッションに添付する画像を選ぶために使います"
+        }
+      ]
     ]
   }
 }

@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
 import {
   KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { DeckState, WatchMode } from '../deck';
 import { C, DOT, MONO, relTime, stateColor, STATE_LABEL } from '../theme';
-import { Frame, Label, PixButton, PixelSprite, TopBar } from '../ui/Pixel';
+import * as api from '../api';
+import { Frame, Label, PixButton, PixelSprite, SelectableText, TopBar } from '../ui/Pixel';
+import type { Link } from '../types';
 import type { Session, Turn } from '../types';
 
 type Tab = 'chat' | 'screen';
-type Props = { session: Session; deck: DeckState; onBack: () => void };
+type Props = { session: Session; deck: DeckState; link: Link; onBack: () => void };
 
 const ESC = String.fromCharCode(27);
 const CTRL_C = String.fromCharCode(3);
@@ -21,7 +24,7 @@ const KEYS: [string, string][] = [
 /* 住人の部屋。会話を読み、下の欄から話しかける。
    呼ばれているとき（承認待ち）は、いまの画面から問いの箱を切り出して見せ、
    承認 / 1 2 3 / Esc を押せるようにする。外出中にやりたいことの九割はこれ。 */
-export default function Room({ session, deck, onBack }: Props) {
+export default function Room({ session, deck, link, onBack }: Props) {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>('chat');
   const [draft, setDraft] = useState('');
@@ -41,6 +44,30 @@ export default function Room({ session, deck, onBack }: Props) {
   useEffect(() => () => deck.watch(null), []);
 
   const key = (seq: string) => deck.sendKey(session.id, seq);
+  const [attaching, setAttaching] = useState(false);
+  const [note, setNote] = useState('');
+
+  /* 画像を Mac に送り、そのパスを文章に差し込む。CLI はパスを見れば Read で読む。
+     写真は JPEG に詰め直して送る（HEIC のままだと読めない）。 */
+  const attach = async () => {
+    setNote('');
+    const picked = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8, base64: true });
+    if (picked.canceled || !picked.assets[0]?.base64) return;
+    const asset = picked.assets[0];
+    setAttaching(true);
+    try {
+      const type = asset.mimeType && /^image\/(png|gif|webp)$/.test(asset.mimeType) ? asset.mimeType : 'image/jpeg';
+      const { path } = await api.authed<{ path: string }>(link, '/api/files/upload', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, data: asset.base64 }),
+      });
+      setDraft((d) => `${d.replace(/\s+$/, '')}${d.trim() ? '\n' : ''}添付画像: ${path}`);
+    } catch (err: any) {
+      setNote(err.message);
+    } finally {
+      setAttaching(false);
+    }
+  };
   const submit = () => {
     const text = draft.replace(/\s+$/, '');
     if (!text) return;
@@ -116,9 +143,10 @@ export default function Room({ session, deck, onBack }: Props) {
       ) : (
         <ScrollView style={s.fill} contentContainerStyle={s.screenBody}>
           <ScrollView horizontal showsHorizontalScrollIndicator>
-            <Text style={s.screenText} selectable>
-              {screen === undefined ? '画面を受け取っています…' : (screen.replace(/\s+$/, '') || '（まだ何も描かれていません）')}
-            </Text>
+            <SelectableText
+              style={s.screenText}
+              text={screen === undefined ? '画面を受け取っています…' : (screen.replace(/\s+$/, '') || '（まだ何も描かれていません）')}
+            />
           </ScrollView>
         </ScrollView>
       )}
@@ -136,9 +164,10 @@ export default function Room({ session, deck, onBack }: Props) {
             onContentSizeChange={() => callScroll.current?.scrollToEnd({ animated: false })}
           >
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <Text style={s.callText} selectable>
-                {tail.length ? tail.join('\n') : (screen === undefined ? '画面を受け取っています…' : '（問いの箱が見つかりません。「画面」で全体を確かめてください）')}
-              </Text>
+              <SelectableText
+                style={s.callText}
+                text={tail.length ? tail.join('\n') : (screen === undefined ? '画面を受け取っています…' : '（問いの箱が見つかりません。「画面」で全体を確かめてください）')}
+              />
             </ScrollView>
           </ScrollView>
         </Frame>
@@ -165,7 +194,9 @@ export default function Room({ session, deck, onBack }: Props) {
         ))}
       </View>
 
+      {note ? <Text style={s.down}>{note}</Text> : null}
       <View style={[s.input, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+        <PixButton label={attaching ? '…' : '画像'} tone="ghost" disabled={attaching} onPress={attach} style={s.attach} />
         <TextInput
           style={s.field}
           value={draft}
@@ -217,7 +248,7 @@ function TurnView({ turn, agent }: { turn: Turn; agent: string }) {
   return (
     <View style={[t.turn, me && t.mine]}>
       <Text style={[t.who, me && { color: C.amber }]}>{me ? 'あなた' : agent}</Text>
-      {turn.text ? <Text style={[t.body, me && t.bodyMine]} selectable>{clip(turn.text)}</Text> : null}
+      {turn.text ? <SelectableText text={clip(turn.text)} style={[t.body, me && t.bodyMine]} /> : null}
       {tools.slice(0, 5).map((x, i) => <Text key={i} style={t.tool} numberOfLines={1}>▸ {x}</Text>)}
       {tools.length > 5 ? <Text style={t.tool}>▸ …あと {tools.length - 5}</Text> : null}
     </View>
@@ -256,6 +287,7 @@ const s = StyleSheet.create({
   callText: { color: C.text, fontFamily: MONO, fontSize: 11, lineHeight: 16 },
   quick: { flexDirection: 'row', gap: 6, paddingHorizontal: 10, paddingBottom: 6 },
   num: { minWidth: 44 },
+  attach: { paddingHorizontal: 6, minHeight: 40 },
   keys: { flexDirection: 'row', gap: 4, paddingHorizontal: 10, paddingBottom: 6 },
   key: {
     flex: 1, height: 36, alignItems: 'center', justifyContent: 'center',
