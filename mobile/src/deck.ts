@@ -2,16 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { toPlain } from './ansi';
 import { wsBase } from './api';
-import type { External, Link, Session, Turn } from './types';
+import type { ButlerState, External, Link, Session, Turn } from './types';
 
 const BEAT_MS = 20000;    // 生存確認を送る間隔
 const DEAD_MS = 10000;    // 返事がなければ切って張り直す
 const BACKOFF = [1000, 2000, 4000, 8000];
+const CR_GAP_MS = 60;     // 文章と Enter を分けて送る間
 
 type Handler = (msg: any) => void;
 
-// WebSocket は React Native 側が一本だけ持つ。
-// 画面をまたいでも繋ぎ直さないので、再接続の面倒がここに集まる。
 /* 繋ぎ先の候補を順に当てて、最初に応えたものを使う。
    LAN の IP は変わるので、控えておいた mDNS 名で拾い直せるようにする。 */
 async function reachable(link: Link): Promise<string> {
@@ -27,6 +26,8 @@ async function reachable(link: Link): Promise<string> {
   return link.host;
 }
 
+// WebSocket は React Native 側が一本だけ持つ。
+// 画面をまたいでも繋ぎ直さないので、再接続の面倒がここに集まる。
 class Deck {
   private ws: WebSocket | null = null;
   private generation = 0;
@@ -56,7 +57,6 @@ class Deck {
       try { this.ws.close(); } catch { /* すでに閉じている */ }
       this.ws = null;
     }
-    // 繋ぎ先を先に確かめてから開く。IP が変わっていても mDNS 名で拾い直せる。
     reachable(this.link).then((host) => {
       if (this.stopped || generation !== this.generation) return;
       this.connect(host, generation);
@@ -67,7 +67,6 @@ class Deck {
     try {
       // React Native の WebSocket は第3引数でヘッダを渡せる。
       // トークンを URL に載せずに済むので、こちらを使う。
-      // （型は DOM の WebSocket が当たっていて 2 引数までなので、そこだけ黙らせる）
       const Sock = WebSocket as unknown as new (
         url: string, protocols: string[], options: { headers: Record<string, string> },
       ) => WebSocket;
@@ -125,7 +124,6 @@ class Deck {
   private startBeat() {
     this.beatTimer = setInterval(() => {
       if (!this.send({ type: 'ping' })) return;
-      // 返事が来なければ、繋がったつもりのまま黙る状態を断ち切る
       clearTimeout(this.deadTimer);
       this.deadTimer = setTimeout(() => { try { this.ws?.close(); } catch {} }, DEAD_MS);
     }, BEAT_MS);
@@ -145,15 +143,24 @@ class Deck {
   }
 }
 
+/* 見る形。chat は会話の並び、text はいまの画面の文字。
+   サーバーは 1 つの繋がりにつきセッション 1 本しか attach を受けないので、
+   切り替えるときは detach してから付け直す。 */
+export type WatchMode = 'chat' | 'text';
+
 export type DeckState = {
   up: boolean;
   sessions: Session[];
   external: External[];
   screens: Record<string, string>;   // セッション id → いまの画面（素のテキスト）
   chats: Record<string, Turn[]>;     // セッション id → 会話の並び（読む用）
-  watch: (id: string | null) => void;
+  butler: ButlerState | null;        // 執事の状態（サーバーが送ってくる。無ければ null）
+  chatOk: boolean | null;            // サーバーが会話（chat）を返せるか。古いサーバーは replay を返してくる
+  watch: (id: string | null, mode?: WatchMode) => void;
   refresh: () => void;
-  send: (payload: any) => void;      // 打鍵などをそのまま流す
+  send: (payload: any) => void;      // そのまま流す
+  sendKey: (id: string, seq: string) => void;
+  sendText: (id: string, text: string) => void;
 };
 
 export function useDeck(link: Link | null): DeckState {
@@ -162,16 +169,24 @@ export function useDeck(link: Link | null): DeckState {
   const [external, setExternal] = useState<External[]>([]);
   const [screens, setScreens] = useState<Record<string, string>>({});
   const [chats, setChats] = useState<Record<string, Turn[]>>({});
+  const [butler, setButler] = useState<ButlerState | null>(null);
+  const [chatOk, setChatOk] = useState<boolean | null>(null);
   const deck = useRef<Deck | null>(null);
-  const watching = useRef<string | null>(null);
+  const watching = useRef<{ id: string; mode: WatchMode } | null>(null);
+
+  const attach = (id: string, mode: WatchMode) => deck.current?.send({ type: 'attach', id, mode });
 
   // 見ているセッションだけ購読する。一覧に戻ったら外す。
-  const watch = useCallback((id: string | null) => {
+  const watch = useCallback((id: string | null, mode: WatchMode = 'chat') => {
     const before = watching.current;
-    if (before === id) return;
-    if (before) deck.current?.send({ type: 'detach', id: before });
-    watching.current = id;
-    if (id) deck.current?.send({ type: 'attach', id, mode: 'chat' });
+    if (before?.id === id && before?.mode === mode) return;
+    if (before) deck.current?.send({ type: 'detach', id: before.id });
+    watching.current = id ? { id, mode } : null;
+    if (id) {
+      // 古い画面を見せない。届くまでは「受け取っています」になる
+      if (mode === 'text') setScreens((prev) => { const next = { ...prev }; delete next[id]; return next; });
+      attach(id, mode);
+    }
   }, []);
 
   const refresh = useCallback(() => deck.current?.open(), []);
@@ -183,8 +198,20 @@ export function useDeck(link: Link | null): DeckState {
       (msg) => {
         if (msg.type === 'sessions') setSessions(msg.sessions);
         else if (msg.type === 'external') setExternal(msg.sessions);
+        else if (msg.type === 'butler') setButler(msg.state ?? null);
         else if (msg.type === 'chat') {
+          setChatOk(true);
           setChats((prev) => ({ ...prev, [msg.id]: msg.turns ?? [] }));
+        }
+        else if (msg.type === 'replay') {
+          // mode を知らない古いサーバー。会話は諦め、画面の文字で読む（text は古い版にもある）
+          setChatOk(false);
+          const w = watching.current;
+          if (w && w.id === msg.id && w.mode === 'chat') {
+            w.mode = 'text';
+            instance.send({ type: 'detach', id: w.id });
+            instance.send({ type: 'attach', id: w.id, mode: 'text' });
+          }
         }
         else if (msg.type === 'snapshot') {
           // text は画面の文字がそのまま入っている（桁を知っているサーバーが組む）。
@@ -196,9 +223,7 @@ export function useDeck(link: Link | null): DeckState {
       (isUp) => {
         setUp(isUp);
         // 繋ぎ直したら、見ていたセッションに戻る
-        if (isUp && watching.current) {
-          instance.send({ type: 'attach', id: watching.current, mode: 'chat' });
-        }
+        if (isUp && watching.current) attach(watching.current.id, watching.current.mode);
       },
     );
     deck.current = instance;
@@ -214,12 +239,18 @@ export function useDeck(link: Link | null): DeckState {
   }, [link?.host, link?.token]);
 
   const send = useCallback((payload: any) => { deck.current?.send(payload); }, []);
+  const sendKey = useCallback((id: string, seq: string) => { deck.current?.send({ type: 'input', id, data: seq }); }, []);
+  // 文章は本文と Enter を分けて送る。ひとかたまりだと貼り付け扱いになって送信されないことがある
+  const sendText = useCallback((id: string, text: string) => {
+    if (!deck.current?.send({ type: 'input', id, data: text })) return;
+    setTimeout(() => deck.current?.send({ type: 'input', id, data: '\r' }), CR_GAP_MS);
+  }, []);
 
-  return { up, sessions, external, screens, chats, watch, refresh, send };
+  return { up, sessions, external, screens, chats, butler, chatOk, watch, refresh, send, sendKey, sendText };
 }
 
 // 並びは PC と同じ考え方：自分の番が先。
 export function byUrgency<T extends { status: string; unread?: boolean; lastActivity?: number }>(list: T[]): T[] {
-  const weight = (s: T) => (s.status === 'attention' ? 0 : s.unread ? 1 : 2);
+  const weight = (s: T) => (s.status === 'attention' ? 0 : s.unread ? 1 : s.status === 'exited' ? 3 : 2);
   return [...list].sort((a, b) => weight(a) - weight(b) || (b.lastActivity ?? 0) - (a.lastActivity ?? 0));
 }
