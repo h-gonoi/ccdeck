@@ -93,6 +93,7 @@ export class Session extends EventEmitter {
     // いま書かれている会話の ID。台帳（revive.js）が定期的に埋める。
     // 起動直後は null で、CLI が記録を書き始めてから入る。
     this.vendorId = null;
+    this.model = null;      // CLI が記録に書いているモデル。定期的に読み直す
     this.familyId = familyId || this.id;
     this.handoffFrom = handoffFrom;
     // command は内部テスト等との互換用。HTTP API からは渡さない。
@@ -232,7 +233,7 @@ export class Session extends EventEmitter {
     return {
       id: this.id, title: this.title, cwd: this.cwd, agent: this.agent, command: this.command,
       familyId: this.familyId, handoffFrom: this.handoffFrom,
-      resumeId: this.resumeId, vendorId: this.vendorId,
+      resumeId: this.resumeId, vendorId: this.vendorId, model: this.model,
       status: this.status, unread: this.unread, bell: this.bell,
       cols: this.cols, rows: this.rows,
       exitCode: this.exitCode, createdAt: this.createdAt, lastActivity: this.lastActivity,

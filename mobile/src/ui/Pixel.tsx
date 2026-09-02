@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { Platform, Pressable, StyleProp, StyleSheet, Text, TextInput, TextStyle, View, ViewStyle } from 'react-native';
+import { Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { spritePalette, spriteRows, SPRITE_W, type Special } from '../sprites';
 import { C, DOT } from '../theme';
 
@@ -61,23 +61,6 @@ export function PixButton({ label, onPress, tone = 'plain', disabled, style, wid
       </Text>
     </Pressable>
   );
-}
-
-/* 一部だけ選んでコピーできる文字。iOS の Text は selectable でも全文しか選べないので、
-   編集できない TextInput で出す（範囲選択とコピーのメニューが付く）。Android は Text で足りる。 */
-export function SelectableText({ text, style }: { text: string; style?: StyleProp<TextStyle> }) {
-  if (Platform.OS === 'ios') {
-    return (
-      <TextInput
-        value={text}
-        editable={false}
-        multiline
-        scrollEnabled={false}
-        style={[{ padding: 0, margin: 0 }, style]}
-      />
-    );
-  }
-  return <Text style={style} selectable>{text}</Text>;
 }
 
 export function Label({ children, color }: { children: ReactNode; color?: string }) {

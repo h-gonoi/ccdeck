@@ -101,6 +101,17 @@ const CODEX_TAIL = '\n\n出力は次の形の JSON だけにすること（前�
 // （Enter がダイアログの既定を確定させてしまう。信頼ダイアログの既定は「No, exit」）
 const DIALOG = /Enter to confirm|Esc to cancel|Do you want|Would you like|Press Enter to continue|❯\s*\d\./i;
 const TRUST = /trust this folder|Is this a project you/i;
+/* 使い切りの合図。これが出ている間に手順を渡しても空振りし、
+   そのまま一巡したことにして次の見立てへ進むと、提案の画面に戻ってしまう（実際に戻った）。
+   見つけたらその場で止めて、主人が戻るまで待つ。 */
+const LIMIT = /usage limit reached|rate limit|quota (exceeded|reached)|too many requests|insufficient credit|out of credit|利用上限|上限に達し/i;
+
+class LimitReached extends Error {
+  constructor(where) {
+    super(`${where}で上限に達しました`);
+    this.limit = true;
+  }
+}
 
 const nodeKey = (dir) => {
   try { const st = fs.statSync(dir); return `${st.dev}:${st.ino}`; } catch { return null; }
@@ -232,6 +243,9 @@ class Butler extends EventEmitter {
     if (plan && (plan.state === 'assessing' || plan.state === 'running')) {
       throw new Error('執事はいま手が離せません。止めるか、終わるのを待ってください');
     }
+    if (plan?.state === 'paused' && plan.note.includes('上限')) {
+      throw new Error('上限で止まっています。回復してから「続ける」を押してください');
+    }
     const chosen = normalizeAgent(agent ?? this.state.agent);
     const seen = new Set();
     const dirs = [];
@@ -256,7 +270,9 @@ class Butler extends EventEmitter {
       note: '',
       items: dirs.map((cwd) => ({
         cwd, title: path.basename(cwd), situation: '', risk: '', steps: [],
-        state: 'assessing', approved: true, sessionId: null, error: null, cursor: 0,
+        state: 'assessing', approved: true, error: null, cursor: 0,
+        // 前の巡で使った働き手が生きていれば引き継ぐ（同じ場所に執事の席は一つ）
+        sessionId: this.inheritSession(plan, cwd),
       })),
       log: [],
     };
@@ -284,6 +300,12 @@ class Butler extends EventEmitter {
         this.changed();
       });
     return this.toJSON();
+  }
+
+  inheritSession(plan, cwd) {
+    const before = plan?.items.find((i) => nodeKey(i.cwd) === nodeKey(cwd));
+    const session = before?.sessionId ? this.manager.get(before.sessionId) : null;
+    return session && session.exitCode === null ? session.id : null;
   }
 
   archive(plan) {
@@ -318,6 +340,7 @@ class Butler extends EventEmitter {
       item.state = 'failed';
       item.error = err.message;
       this.log(plan, `${item.title}: 見立てに失敗（${err.message}）`);
+      if (err.limit || LIMIT.test(err.message)) this.hitLimit(plan, '見立て');
     }
     this.changed();
   }
@@ -335,9 +358,11 @@ class Butler extends EventEmitter {
     return clip(text, CONTEXT_CHARS);
   }
 
+  // 文脈に使うのは主人のセッション。執事自身の席は数えない（自分の指示を読み返しても足しにならない）
   liveSession(cwd, agent = null) {
     const key = nodeKey(cwd);
-    const live = [...this.manager.sessions.values()].filter((s) => s.exitCode === null && nodeKey(s.cwd) === key);
+    const live = [...this.manager.sessions.values()]
+      .filter((s) => s.exitCode === null && nodeKey(s.cwd) === key && !s.title.endsWith('(執事)'));
     return live.find((s) => agent && s.agent === agent) ?? live[0] ?? null;
   }
 
@@ -443,6 +468,7 @@ class Butler extends EventEmitter {
 
   async run(plan) {
     await Promise.all(plan.items.filter((i) => i.approved).map((item) => this.runItem(plan, item)));
+    // 上限で止めたときは done にせず、そのまま待つ（次の見立ても始めない）
     if (this.state.plan !== plan || plan.state !== 'running') return;
     const failed = plan.items.filter((i) => i.state === 'failed').length;
     plan.state = 'done';
@@ -478,6 +504,7 @@ class Butler extends EventEmitter {
         // 手が空くのを待つ。呼んでいる（承認待ち）間は人の番なので待つ
         await this.waitFor(session, plan, () => this.ready(session));
         if (this.stopped(plan)) return;
+        this.checkLimit(session, '手順を渡す前');
         this.type(session, step.instruction);
         step.state = 'sent';
         step.sentAt = Date.now();
@@ -487,6 +514,7 @@ class Butler extends EventEmitter {
         await this.waitFor(session, plan, (st) => st === 'running', RUN_TIMEOUT_MS).catch(() => {});
         await this.waitSettled(session, plan);
         if (this.stopped(plan)) return;
+        this.checkLimit(session, '手順の途中');
         step.state = 'done';
         step.doneAt = Date.now();
         this.log(plan, `${item.title}: 「${step.title}」が終わりました`);
@@ -496,19 +524,26 @@ class Butler extends EventEmitter {
     } catch (err) {
       if (this.state.plan !== plan) return;
       if (err?.message === 'cancelled') return;
-      item.state = 'failed';
+      item.state = err.limit ? 'paused' : 'failed';
       item.error = err.message;
       this.log(plan, `${item.title}: 止まりました（${err.message}）`);
+      // 上限は「失敗」ではなく「待ち」。渡していない手順は次に回す
+      if (err.limit) {
+        for (const step of item.steps) if (step.state === 'sent') step.state = 'pending';
+        this.hitLimit(plan, '手順の実行');
+      }
     }
     this.changed();
   }
 
-  // 同じ場所で生きているセッションがあれば使う。無ければ立てて、起きるまで待つ
+  /* 執事は自分の席で動く。主人が開いているセッションには入らない
+     （打ちかけの入力を奪い、会話の筋も混ざる）。同じ場所での席は一つで、巡をまたいで使い回す。 */
   async ensureSession(plan, item) {
-    const found = this.liveSession(item.cwd, plan.agent);
-    if (found) return found;
-    const session = this.manager.create({ cwd: item.cwd, title: item.title, agent: plan.agent });
-    this.log(plan, `${item.title}: セッションを立てました`);
+    const own = item.sessionId ? this.manager.get(item.sessionId) : null;
+    if (own && own.exitCode === null) return own;
+    const session = this.manager.create({ cwd: item.cwd, title: `${item.title}(執事)`, agent: plan.agent });
+    item.sessionId = session.id;
+    this.log(plan, `${item.title}: 執事の席を立てました`);
     this.changed();
     await this.waitFor(session, plan, (st) => st === 'idle' || st === 'attention', START_TIMEOUT_MS);
     // 初めての場所だと「このフォルダを信頼しますか」が出る。主人がこのプロジェクトを選んだのだから、
@@ -530,6 +565,19 @@ class Butler extends EventEmitter {
   // 指示を渡せる状態か：手が空いていて、画面に問いかけが出ていない
   ready(session) {
     return session.status === 'idle' && !DIALOG.test(session.screenText());
+  }
+
+  // 上限に当たっていないか。当たっていれば投げて、巡ごと止める
+  checkLimit(session, where) {
+    if (LIMIT.test(session.screenText())) throw new LimitReached(where);
+  }
+
+  hitLimit(plan, where) {
+    if (plan.state === 'paused') return;
+    plan.state = 'paused';
+    plan.note = `${where}で上限に達しました。回復してから「続ける」を押してください（勝手には進めません）`;
+    this.log(plan, `上限に達したので止めました（${where}）`);
+    this.changed();
   }
 
   // 貼り付けとして渡し、改行を送信と取られないようにする。Enter は少し置いてから

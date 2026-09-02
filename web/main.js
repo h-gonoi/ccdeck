@@ -1134,6 +1134,9 @@ function renderStage() {
       ? `${AGENT_LABEL[agent]} で実行中`
       : `${AGENT_LABEL[agent]} にコンテキストを引き継ぐ`;
   }
+  const model = $('btn-model');
+  model.hidden = tiled || !session;
+  if (session && !tiled) model.textContent = session.model || 'モデル';
   if (!session) return;
   $('stage-dot').className = `stage__dot stage__dot--${session.status}`;
   $('stage-name').textContent = tiled ? `${state.panes.length} 枠を表示中` : session.title;
@@ -1313,6 +1316,12 @@ $('btn-pair').onclick = () => togglePairCode();
 $('btn-butler-agent').onclick = () => toggleButlerAgent();
 $('btn-rail').onclick = () => toggleRail();
 $('btn-tile').onclick = () => tileAll();
+// モデルの切り替えは CLI に任せる。/model を開けば、その場の正しい一覧が出る
+$('btn-model').onclick = () => {
+  if (!state.activeId) return;
+  send({ type: 'input', id: state.activeId, data: '/model' });
+  setTimeout(() => send({ type: 'input', id: state.activeId, data: '\r' }), 80);
+};
 $('stage-agent-claude').onclick = () => switchAgent('claude');
 $('stage-agent-codex').onclick = () => switchAgent('codex');
 

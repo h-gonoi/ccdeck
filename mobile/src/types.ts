@@ -6,6 +6,7 @@ export type Session = {
   cwd: string;
   agent: 'claude' | 'codex';
   command: string;
+  model: string | null;   // CLI が記録に残しているモデル。判らなければ null
   status: Status;
   unread: boolean;
   bell: boolean;
