@@ -49,6 +49,14 @@ const POISON_ENV = {
   codex: ['CODEX_CI', 'CODEX_SESSION_ID', 'CODEX_THREAD_ID'],
 };
 
+// 子プロセスに渡す環境。ccdeck を agent セッションの中から起こしていても、
+// 子が「子セッション」扱いにならないよう、上の変数を落としたものを返す。
+export function cleanEnv(agent = 'claude') {
+  const env = { ...process.env };
+  for (const key of POISON_ENV[agent] ?? POISON_ENV.claude) delete env[key];
+  return env;
+}
+
 // Claude Code は待機中もステータスラインを更新し続けるので「出力がある＝実行中」は成立しない。
 // 出力は再評価のトリガーにだけ使い、状態は必ず画面の中身から判定する。
 const EVAL_MS = 250;          // 画面を再分類する最小間隔
@@ -58,7 +66,8 @@ const REPLAY_LIMIT = 512 * 1024; // 再接続時に再生する生出力の上�
 // headless な xterm に食わせて「実際に描画された画面」で判定する。
 const PATTERNS = {
   running: /esc to interrupt|ctrl\+c to (?:stop|cancel)/i,
-  attention: /Do you want|Would you like|Choose an option|❯\s*1\.|\b1\.\s*Yes\b|Press Enter to continue/i,
+  // 「このフォルダを信頼しますか」など、番号の付かない選択肢のダイアログも拾う（Enter to confirm）
+  attention: /Do you want|Would you like|Choose an option|❯\s*1\.|\b1\.\s*Yes\b|Press Enter to continue|Enter to confirm|Is this a project you/i,
 };
 
 function classify(screen) {
