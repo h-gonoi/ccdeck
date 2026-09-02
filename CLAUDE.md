@@ -41,7 +41,8 @@ server/
   projects.js  リポジトリの自動スキャンと「最近使った」順（~/.ccdeck/recent.json）
   files.js     ファイル読み書き（プロジェクト外は拒否する）
   revive.js    落ちる前に台帳を書き、次の起動で前回の続きを起こす
-  transcripts.js  CLI が残す会話記録の場所と ID を引く（引き継ぎと復元が使う）
+  transcripts.js  CLI が残す会話記録の場所と ID を引く（引き継ぎ・復元・スマホの会話表示が使う）
+  butler.js    執事。見立て（claude -p / codex exec、読み取り専用）→ 提案 → 承認 → 手順を渡す
 web/
   main.js      画面の状態管理。state.panes が表示中の枠
   term.js      xterm.js の管理。複数ペインをここが持つ
@@ -49,8 +50,11 @@ web/
 menubar/
   main.swift   NSStatusItem の常駐アプリ
 mobile/
-  src/deck.ts  React Native 側の WebSocket・再接続・snapshot 購読
-  src/screens/ M1 のペアリング・一覧・読み取り画面・設定
+  src/deck.ts  React Native 側の WebSocket・再接続・chat/text 購読・入力
+  src/screens/ Lobby（部屋の絵＋住人一覧）・Room（会話・入力・承認）・Butler・Pair・Settings
+  src/ui/Pixel.tsx  ドット絵の住人（View のランレングス描画）・枠・ボタン
+  scene/scene.html  部屋の絵（canvas）。直したら `npm run scene` で src/scene/html.ts を生成し直す
+  scene/sprites.json  住人の絵。scene.html と src/sprites.ts の両方が読む（片方だけ直すと別人になる）
 ```
 
 ## 踏んだ落とし穴（同じ穴を掘り直さないこと）
@@ -166,6 +170,44 @@ Claude Code は `~/Projects/x` と記録することがある。文字列で突�
 
 記録の入口は POST `/api/sessions` の `touchRecent` 一か所だけ。外部セッションでは記録しない。
 
+### 番号の付かないダイアログも「要対応」
+
+Claude Code の「このフォルダを信頼しますか」は `Do you want` も `1. Yes` も含まず、
+`Enter to confirm` と `❯ No, exit` しか出ない。ここを `idle` と見ると、
+**執事やスマホが「手が空いた」と思って Enter を送り、既定の「No, exit」で CLI が落ちる**（実際に落ちた）。
+`sessions.js` の `PATTERNS.attention` に `Enter to confirm` を足してある。ダイアログの言い回しが増えたら、
+まずここに足すこと。執事側は念のため `DIALOG` で画面を見てからしか手順を渡さない。
+
+### スマホは古いサーバーにも繋がる
+
+`attach { mode:'chat' }` を知らないサーバー（会話モードより前に起動したもの）は `replay` を返す。
+スマホ側は `replay` が来たら会話を諦めて `text` に切り替える（`deck.ts` の `chatOk`）。
+「会話が出ない」と言われたら、まずサーバーを入れ替えていないか疑うこと。
+自分がいま動いているサーバーがディスク上のコードと同じとは限らない（`/api/health` の `buildId` は起動時刻）。
+
+### 二つ目のサーバーは `CCDECK_HOME` で隔てる
+
+試験用に別ポートで立てるとき、そのまま起こすと **本番の台帳（`~/.ccdeck/sessions.json`）を読んで
+前回のセッションを二重に復元**してしまう。`CCDECK_HOME=/tmp/x CCDECK_PORT=7799 node server/index.js`
+のように置き場ごと分けること。台帳・端末・履歴・執事の状態がすべてそこに入る。
+
+### Expo Go の歯車と Maestro
+
+Expo Go の開発メニューを開く丸いボタンが画面右上に居座り、そこに置いた「設定」を Maestro が叩けない。
+テキストの上に別のビューが重なると Maestro はそちらを叩く。ロビーでは繋ぎ先の名前（中央）を押しても設定へ行けるので、
+自動化ではそちらを叩く。行の中身は 1 つの accessibility 要素にまとまるので、`text: "probe, .*"` のように正規表現で当てる。
+
+## 執事の決めごと
+
+- **見立ては読み取り専用。** `claude -p --allowedTools <読むものだけ> --disallowedTools Edit,Write,…`、
+  Codex は `exec --sandbox read-only`。ここを緩めると「見立て」のつもりで変更が入る
+- **手順を渡すのは承認のあとだけ。** 一巡ごとに承認を挟む（`autoNext` は次の見立てを自動で始めるだけ）
+- **承認待ち（attention）は人の仕事。** 執事は押さない。例外は自分で立てたセッションの信頼ダイアログだけ
+- **手順は貼り付けとして渡す**（`ESC[200~ … ESC[201~` のあと少し置いて `\r`）。改行を送信と取られない
+- **idle が 6 秒続いたら手順が終わったとみなす。** ツールの合間の一瞬の idle を終わりと見ないため
+- 状態は `~/.ccdeck/butler.json`。サーバーを入れ替えると走っていた巡は `paused` になる。勝手に再開しない
+- モデル: Claude は `claude-fable-5-1`（`models.claude`）、Codex は指定なし＝codex の設定に従う（`models.codex`）
+
 ## 外部セッションの扱い
 
 `~/.claude/sessions/<PID>.json` を読んでいる。Claude Code 自身が書くので、
@@ -210,6 +252,18 @@ HTTP からプロンプトやコマンドを受け取らず、サーバー内で
 4. 画面を開き直して枠が復元されるか（localStorage の `ccdeck.panes`）
 5. サーバーを入れ替えたあと、前のセッションが同じ番号・同じ枠で戻るか
    （`~/.ccdeck/sessions.json` に載っていること、`vendorId` が埋まっていること）
+
+スマホまわりを触ったら、これも見る（`mobile/` で `npm run typecheck`、絵を直したら `npm run scene`）。
+
+- 呼ばれているセッションの部屋で、問いの箱が切り出されて「承認 ⏎ / 1 2 3 / Esc」が出ること
+- 話しかけた文章がそのまま届き、送信されること（改行を含む文章も）
+- 古いサーバー（`chat` 未対応）に繋いでも画面の文字で読めること
+
+執事を触ったら、これも見る。
+
+- 見立ての途中で何も変更されないこと（`git status` が見立て前後で同じ）
+- 初めてのフォルダで立てたセッションが「信頼しますか」で落ちないこと
+- 承認前に外した手順が渡されないこと。「止める」で以後の手順が渡されないこと
 
 `--lan` まわりを触ったら、これも見る。
 
