@@ -1,0 +1,64 @@
+{
+  "w": 18,
+  "h": 26,
+  "hairAt": 3,
+  "eyeRow": 8,
+  "base": [
+    "..................",
+    "......WWWWWW......",
+    ".....WhhhhhhW.....",
+    "....WhhhhhhhhW....",
+    "....WhhHHhhhhW....",
+    "....WhhhhhhhhW....",
+    "....WhSSSSSShW....",
+    "....WSSSSSSSSW....",
+    "....WSSeSSeSSW....",
+    "....WSSSSSSSSW....",
+    "....WSSSmmSSSW....",
+    ".....WSSSSSSW.....",
+    "......WssssW......",
+    "......WsssW.......",
+    "...WWCCCCCCCCWW...",
+    "..WKCCCCCCCCCCKW..",
+    "..WKcCCCCCCCCcKW..",
+    "..WKcCCCCCCCCcKW..",
+    "..WKcCCCCCCCCcKW..",
+    "...WcCCCCCCCCcW...",
+    "....WCCCCCCCCW....",
+    "....WPPPPPPPPW....",
+    "....WPPPWWPPPW....",
+    "....WPPPWWPPPW....",
+    "...WBBBBWWBBBBW...",
+    "...WWWWWWWWWWWW..."
+  ],
+  "hair": {
+    "bob":   ["....WhhhhhhhhW....", "....WhhHHhhhhW....", "....WhhhhhhhhW....", "....WhSSSSSShW...."],
+    "spike": ["....WhWhhWhhhW....", "....WhhhhHhhhW....", "....WhhhhhhhhW....", "....WhSSSSSShW...."],
+    "cap":   ["....WCCCCCCCCW....", "....WCCHHCCCCW....", "....WCCCCCCCCW....", "...WooooooooooW..."],
+    "long":  ["....WhhhhhhhhW....", "....WhhhhHHhhW....", "....WhhhhhhhhW....", "....WhhSSSShhW...."]
+  },
+  "hairColors": [
+    { "h": "#5a3a20", "H": "#8a5f38" },
+    { "h": "#2b2a33", "H": "#55545f" },
+    { "h": "#7a4a2a", "H": "#b0864c" },
+    { "h": "#8a6a4a", "H": "#c9a97a" }
+  ],
+  "shirts": [
+    { "C": "#e0554a", "c": "#a63c4c" },
+    { "C": "#4a86d8", "c": "#33589e" },
+    { "C": "#4fb06a", "c": "#2f7a4c" },
+    { "C": "#3fa8a0", "c": "#2a7570" },
+    { "C": "#9a6fd8", "c": "#6a4a9e" }
+  ],
+  "fixed": {
+    "W": "#ffffff", "o": "#3a2f2a", "S": "#ffd9a8", "s": "#d9a374",
+    "e": "#2a2020", "m": "#c0685a", "K": "#ffd9a8", "P": "#3f4a6b", "B": "#3a2f2a"
+  },
+  "specials": {
+    "butler": {
+      "hair": ["....WhhhhhhhhW....", "....WhhhhhhhhW....", "....WhhhhhhhhW....", "....WhSSSSSShW...."],
+      "rows": { "14": "...WWCCCbbCCCWW...", "15": "..WKCCCCbbCCCCKW.." },
+      "palette": { "h": "#1c1a1f", "H": "#3a3740", "C": "#22222a", "c": "#15151a", "K": "#f4f4f4", "b": "#c0352b", "P": "#22222a", "B": "#111114" }
+    }
+  }
+}

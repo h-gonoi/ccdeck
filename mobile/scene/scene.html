@@ -1,0 +1,177 @@
+<!doctype html><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<style>
+@font-face{font-family:'Dot';src:url(__FONT__) format('truetype');font-display:block}
+html,body{margin:0;height:100%;background:#0d0c0a;overflow:hidden;
+  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+canvas{display:block;width:100%;height:100%;touch-action:manipulation}
+</style>
+<canvas id="s"></canvas>
+<script>
+/* 部屋の絵。RN から state（住人の一覧）を受け、住人を叩いたら select を返す。
+   絵はすべてコードで描く（画像を貼ると動かせないため）。文字と操作は RN 側。 */
+const SPR = __SPRITES__;
+const cv=document.getElementById('s'), ctx=cv.getContext('2d',{alpha:false});
+const post=(m)=>window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify(m));
+
+const P={ink:'#0d0c0a',text:'#f0ece2',dim:'#9c968a',faint:'#5f5a51',amber:'#e0a145',green:'#6f9a72',dark:'#3a2f2a',white:'#ffffff'};
+const RM={wall:'#bcd9d1',wallHi:'#d2e8e2',wallLo:'#a3c4bb',
+  floor:'#e9d9b2',grid:'#c9b183',base:'#b99a6a',
+  desk:'#c78a4e',deskHi:'#e0a86a',deskLo:'#9a6636',
+  sky:'#9ed4f2',cloud:'#ffffff',sash:'#ffffff',hill:'#8ec98a',
+  mon:'#eaeaea',scr:'#20301f',scrLit:'#7ee08a',line:'#5a4a3a'};
+
+let ST={sessions:[],up:true,butler:null};
+let W=0,H=0,dpr=1,tick=0,hits=[];
+
+const hash=(s)=>{let h=0;for(const c of String(s))h=(h*31+c.charCodeAt(0))>>>0;return h;};
+const HAIRK=Object.keys(SPR.hair);
+function lookOf(title){const n=hash(title);
+  return {hair:HAIRK[n%HAIRK.length],hairC:SPR.hairColors[(n>>>2)%SPR.hairColors.length],
+    shirt:SPR.shirts[(n>>>5)%SPR.shirts.length],seed:n%97};}
+/* 住人の絵。特別な住人（執事）は髪と服を差し替える。まばたきは人ごとに周期をずらす。 */
+function rowsOf(title,special){
+  const look=lookOf(title), sp=special?SPR.specials[special]:null;
+  const r=SPR.base.slice();
+  (sp?sp.hair:SPR.hair[look.hair]).forEach((l,k)=>{r[SPR.hairAt+k]=l;});
+  if(sp&&sp.rows) for(const k in sp.rows) r[+k]=sp.rows[k];
+  if((tick+look.seed)%90<2) r[SPR.eyeRow]=r[SPR.eyeRow].split('e').join('S');
+  return r;}
+function mix(a,b,t){const p=s=>[1,3,5].map(i=>parseInt(s.slice(i,i+2),16));
+  const A=p(a),B=p(b);return '#'+A.map((v,i)=>Math.round(v+(B[i]-v)*t).toString(16).padStart(2,'0')).join('');}
+function palOf(title,dim,special){
+  const look=lookOf(title), sp=special?SPR.specials[special]:null;
+  const src=Object.assign({},SPR.fixed,{h:look.hairC.h,H:look.hairC.H,C:look.shirt.C,c:look.shirt.c},sp?sp.palette:{});
+  const out={'.':null};
+  for(const k in src) out[k]=dim?mix(src[k],'#8fa8a0',0.45):src[k];
+  return out;}
+function paint(rows,d,x,y,pal){for(let j=0;j<rows.length;j++)for(let i=0;i<rows[j].length;i++){
+  const c=pal[rows[j][i]];if(!c)continue;ctx.fillStyle=c;ctx.fillRect(x+i*d,y+j*d,d,d);}}
+
+const FONT=(size)=>size+'px Dot,ui-monospace,Menlo,monospace';
+const T=(s,x,y,c,size)=>{ctx.font=FONT(size||12);ctx.textBaseline='top';ctx.fillStyle=c||P.text;ctx.fillText(s,x|0,y|0);};
+const TW=(s,size)=>{ctx.font=FONT(size||12);return ctx.measureText(s).width;};
+
+/* 家具も 1 ドットずつ置く。矩形の積み上げだと角が全部直角になって浮く。 */
+const PR={
+ window:['oooooooooooooo','oWWWWWWWWWWWWo','oWssssWsssssWo','oWsccsWssscsWo','oWssssWsssssWo','oWWWWWWWWWWWWo','oWggggWgggggWo','oWggggWgggggWo','oWWWWWWWWWWWWo','oLLLLLLLLLLLLo'],
+ desk:['tttttttttttttttttt','TTTTTTTTTTTTTTTTTT','dddddddddddddddddd','..dd..........dd..','..dD..........dD..','..dD..........dD..','..dD..........dD..','..oo..........oo..'],
+ monitor:['ooooooooooooo','oMMMMMMMMMMMo','oMsssssssssMo','oMsssssssssMo','oMsssssssssMo','oMsssssssssMo','oMsssssssssMo','oMMMMMMMMMMMo','ooooooooooooo','.....ooo.....','...ooooooo...'],
+ plant:['..ggg..','.ggGgg.','ggGgGgg','.gGggg.','..ggg..','.pppppp','.pPPPPp','.oooooo'],
+ me:['......WWWWWW......','.....WhhhhhhW.....','....WhhhhhhhhW....','....WhhhhhhhhW....','....WhhhhhhhhW....','....WhhhhhhhhW....','.....WhhhhhhW.....','......WssssW......','...WWCCCCCCCCWW...','..WCCCCCCCCCCCCW..','..WCcCCCCCCCCcCW..','..WCcCCCCCCCCcCW..','..WCcCCCCCCCCcCW..','..WCcCCCCCCCCcCW..','...WcCCCCCCCCcW...','....WCCCCCCCCW....','...WWWWWWWWWWWW...'],
+ door:['oooooooooo','oDDDDDDDDo','oDdddddDDo','oDdddddDDo','oDdddddDDo','oDDDDDDDDo','oDDDDDDDDo','oDDDDkDDDo','oDDDDkDDDo','oDDDDDDDDo','oDdddddDDo','oDdddddDDo','oDdddddDDo','oDDDDDDDDo','oooooooooo'],
+ rug:['rrrrrrrrrrrrrrrrrrrr','rRRRRRRRRRRRRRRRRRRr','rRrRrRrRrRrRrRrRrRRr','rRRRRRRRRRRRRRRRRRRr','rrrrrrrrrrrrrrrrrrrr'],
+ clock:['.oooo.','oWWWWo','oWoWWo','oWooWo','oWWWWo','.oooo.'],
+ shelf:['oooooooooooo','o1.22.3.4.5o','o1.22.3.4.5o','o1.22.3.4.5o','oooooooooooo','.o........o.'],
+};
+function blit(name,ox2,oy2,pal,R0){const m=PR[name];
+  for(let j=0;j<m.length;j++)for(let i=0;i<m[j].length;i++){
+    const c=pal[m[j][i]]; if(c) R0(ox2+i,oy2+j,1,1,c);}}
+
+/* 部屋は 88×46 マス。幅からマスの大きさ d を決め、RN 側も同じ式で高さを出す。 */
+const MC=88, MR=51, FY=34;
+const SPOT_BACK=[48,34,20];        // 呼んでいる住人：机の前から扉へ向かって並ぶ
+const SPRW=SPR.w, SPRH=SPR.h;
+
+function bubble(R,x,y,kind){
+  // 吹き出し。kind: '!'（あなたの番）/ '…'（作業中）
+  R(x,y,12,9,P.dark); R(x+1,y+1,10,7,P.white); R(x+4,y+9,3,2,P.dark); R(x+5,y+9,2,1,P.white);
+  if(kind==='!'){ R(x+5,y+2,2,4,P.amber); R(x+5,y+7,2,1,P.amber); }
+  else { R(x+2,y+4,2,2,P.dark); R(x+5,y+4,2,2,P.dark); R(x+8,y+4,2,2,P.dark); }
+}
+
+function room(d){
+  const ox=((W-MC*d)/2|0), oy=0;
+  const R=(a,b,ww,hh,c)=>{ctx.fillStyle=c;ctx.fillRect(ox+(a|0)*d,oy+(b|0)*d,(ww|0)*d,(hh|0)*d);};
+  // 壁と床は画面の端まで敷く（部屋の幅はマス単位で決まるので、余りが黒く残らないように）
+  const F=(b,hh,c)=>{ctx.fillStyle=c;ctx.fillRect(0,oy+b*d,W,hh*d);};
+  F(0,FY,RM.wall); F(0,2,RM.wallHi); F(FY-3,3,RM.wallLo); F(FY,MR-FY,RM.floor); F(MR-1,1,RM.base);
+  for(let a=(ox%(7*d))-7*d;a<W;a+=7*d){ctx.fillStyle=RM.grid;ctx.fillRect(a,oy+FY*d,d,(MR-FY)*d);}
+  blit('door',3,FY-15,{o:'#4a3524',D:'#8a5f38',d:'#6b4a2a',k:'#e8c86a'},R);
+  blit('window',20,4,{o:'#5a4a3a',W:RM.sash,s:RM.sky,c:RM.cloud,g:RM.hill,L:'#c8d4d8'},R);
+  blit('shelf',40,6,{o:'#6b4a2a','1':'#c0504a','2':'#4a86d8','3':'#4fb06a','4':'#e0a86a','5':'#9a6fd8','.':null},R);
+  blit('clock',58,5,{o:'#3a2f2a',W:'#f4f4f4'},R);
+  blit('rug',30,FY+7,{r:'#b85a4c',R:'#e07a6a'},R);
+  blit('plant',80,FY-1,{g:'#4fae4f',G:'#77d077',p:'#d08a52',P:'#e8a870',o:'#8a5a30','.':null},R);
+  // あなたの机と、こちらに背を向けたあなた
+  blit('desk',66,FY-6,{t:RM.deskHi,T:RM.desk,d:RM.deskLo,D:'#7a5530',o:'#4a3524','.':null},R);
+  blit('monitor',69,FY-16,{o:'#3a3a3e',M:RM.mon,s:RM.scr,'.':null},R);
+  for(let k=0;k<5;k++) R(71,FY-14+k,1+((k*3+(tick>>2))%8),1,RM.scrLit);
+  blit('me',68,FY-19,{W:'#ffffff',h:'#3a2f28',s:'#d9a374',C:'#5a6270',c:'#3f4550'},R);
+  return {ox,oy,R};
+}
+
+function resident(g,d,s,cx,cy,opt){
+  // cx,cy はマス座標（左上）。名前は足元に出す。
+  const bob=opt.bob?1:0;
+  const px=g.ox+cx*d, py=g.oy+(cy+bob)*d;
+  paint(rowsOf(s.title,opt.special),d,px,py,palOf(s.title,opt.dim,opt.special));
+  if(opt.bubble) bubble(g.R,cx+3,cy-11+bob,opt.bubble);
+  if(opt.name!==false){
+    const name=String(s.title).length>9?String(s.title).slice(0,8)+'…':String(s.title);
+    const tw=TW(name,10); const tx=px+(SPRW*d-tw)/2;
+    // 奥の列は足元が隠れるので頭の上に出す（吹き出しがあればその上）
+    const ty=opt.nameAbove?py-(opt.bubble?11*d:0)-13:py+SPRH*d+2;
+    ctx.fillStyle='rgba(13,12,10,0.55)'; ctx.fillRect(tx-3,ty-1,tw+6,12);
+    T(name,tx,ty,opt.bubble==='!'?P.amber:P.text,10);
+  }
+  hits.push({x:px,y:py-(opt.bubble?11*d:0),w:SPRW*d,h:SPRH*d+(opt.bubble?11*d:0)+14,act:()=>post({t:'select',id:s.id})});
+}
+
+function draw(){
+  tick++; hits=[];
+  const nd=Math.min(3,window.devicePixelRatio||1), nw=innerWidth, nh=innerHeight;
+  if(nd!==dpr||nw!==W||nh!==H){dpr=nd;W=nw;H=nh;cv.width=(W*dpr)|0;cv.height=(H*dpr)|0;}
+  ctx.setTransform(dpr,0,0,dpr,0,0); ctx.imageSmoothingEnabled=false;
+  ctx.fillStyle=P.ink; ctx.fillRect(0,0,W,H);
+  const d=Math.max(2,Math.floor(W/MC));
+  const g=room(d);
+
+  const live=ST.sessions.filter(s=>s.status!=='exited');
+  // 机の近くから順に並ぶ。執事、呼んでいる住人、働いている住人、手が空いた住人。
+  const rank=(s)=>s.status==='attention'?0:(s.status==='running'||s.status==='starting')?1:2;
+  const people=[];
+  if(ST.butler&&ST.butler.present) people.push({s:{id:'__butler__',title:ST.butler.name||'執事'},special:'butler',
+    bubble:ST.butler.proposal?'!':null,busy:!!ST.butler.busy});
+  live.slice().sort((a,b)=>rank(a)-rank(b)).forEach(s=>people.push({s,
+    bubble:s.status==='attention'?'!':(rank(s)===1?'…':null),busy:rank(s)===1}));
+  // 3 人までは手前に一列。4 人以上は奥と手前を交互に置いて重ねる（顔が見えれば判る）
+  const SLOTS=people.length<=3?[[48,0],[30,0],[12,0]]:[[50,0],[38,1],[26,0],[14,1],[2,0]];
+  const shown=people.slice(0,SLOTS.length);
+  // 手前の列をあとに描く（重なりの前後）
+  shown.map((p,k)=>({p,k})).sort((a,b)=>SLOTS[b.k][1]-SLOTS[a.k][1]).forEach(({p,k})=>{
+    const [x,back]=SLOTS[k];
+    resident(g,d,p.s,x,back?FY-23:FY-17,{special:p.special,bubble:p.bubble,
+      bob:p.busy&&(((tick>>2)+k)&1),nameAbove:!!back,name:!(back&&p.bubble)});
+  });
+  if(people.length>shown.length) T('+'+(people.length-shown.length),g.ox+2*d,g.oy+(FY-32)*d,P.dim,11);
+
+  if(!live.length&&!(ST.butler&&ST.butler.present)){
+    const m='住人はいません'; T(m,g.ox+(MC*d-TW(m,13))/2,g.oy+(FY-22)*d,P.faint,13);
+  }
+  if(!ST.up){
+    ctx.fillStyle='rgba(13,12,10,0.55)'; ctx.fillRect(0,0,W,H);
+    const m='切断中'; T(m,(W-TW(m,14))/2,(H-14)/2,'#a8615b',14);
+  }
+}
+function loop(){ try{ draw(); }catch(err){ post({t:'error',where:'draw',msg:String(err&&err.message||err)}); } setTimeout(loop,80); }
+
+cv.addEventListener('click',e=>{
+  const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;
+  for(let i=hits.length-1;i>=0;i--){const h=hits[i];
+    if(x>=h.x&&x<=h.x+h.w&&y>=h.y&&y<=h.y+h.h){h.act();return;}}
+});
+function onMsg(ev){ try{ const m=JSON.parse(ev.data);
+  if(m.t==='state'){ ST.sessions=m.sessions||[]; ST.up=m.up!==false; ST.butler=m.butler||null; }
+}catch(e){} }
+document.addEventListener('message',onMsg); window.addEventListener('message',onMsg);
+
+// ブラウザで直接開いたときの見本（?mock）。RN からは付かない。
+if(location.search.indexOf('mock')>=0){
+  ST.sessions=[{id:'a',title:'quiz-app',status:'attention'},{id:'b',title:'penca',status:'running'},
+    {id:'c',title:'ai-coach-science',status:'idle'},{id:'d',title:'ccdeck',status:'running'},{id:'e',title:'ledger',status:'attention'},{id:'f',title:'menubar',status:'idle'}];
+  ST.butler={present:true,proposal:true};
+}
+document.fonts.load('16px Dot').then(()=>document.fonts.ready)
+  .catch(()=>{}).then(()=>{ loop(); post({t:'ready'}); });
+</script>

@@ -290,13 +290,42 @@ export function transcriptFor(session) {
 /* 会話を「発言の並び」として返す。ターミナルの生画面ではなく、
    スマホで読める形に組み替えるために使う。
    ツールの実行は名前だけ拾って畳む（中身は長すぎて読めない）。 */
+/* ツールは名前だけでなく短い中身も添える。スマホでは「Bash」とだけ出ても
+   何をしたのか判らない。Bash は説明文（無ければコマンド）、ファイル系はファイル名、
+   質問はその文面。長いものは切る。 */
+const TOOL_DETAIL_MAX = 72;
+function toolLabel(block) {
+  const name = block.name || 'tool';
+  const input = block.input && typeof block.input === 'object' ? block.input : {};
+  const str = (v) => (typeof v === 'string' ? v : '');
+  let detail = '';
+  if (name === 'Bash') detail = str(input.description) || str(input.command);
+  else if (name === 'AskUserQuestion' && Array.isArray(input.questions)) {
+    const q = input.questions[0] ?? {};
+    const opts = Array.isArray(q.options) ? q.options.map((o) => str(o?.label)).filter(Boolean) : [];
+    detail = [str(q.question), opts.length ? `(${opts.join(' / ')})` : ''].filter(Boolean).join(' ');
+  }
+  else if (str(input.file_path)) detail = path.basename(input.file_path);
+  else if (str(input.notebook_path)) detail = path.basename(input.notebook_path);
+  else if (str(input.pattern)) detail = input.pattern;
+  else if (str(input.skill)) detail = input.skill;
+  else if (str(input.url)) detail = input.url;
+  else if (str(input.query)) detail = input.query;
+  else if (str(input.description)) detail = input.description;
+  else if (str(input.command)) detail = input.command;
+  detail = detail.replace(/\s+/g, ' ').trim();
+  const max = name === 'AskUserQuestion' ? TOOL_DETAIL_MAX * 2 : TOOL_DETAIL_MAX;
+  if (detail.length > max) detail = `${detail.slice(0, max - 1)}…`;
+  return detail ? `${name}: ${detail}` : name;
+}
+
 function turnsClaude(file, limit) {
   const turns = [];
   for (const entry of jsonLines(file)) {
     if (!['user', 'assistant'].includes(entry.type)) continue;
     const role = entry.message?.role || entry.type;
     const blocks = Array.isArray(entry.message?.content) ? entry.message.content : [];
-    const tools = blocks.filter((b) => b?.type === 'tool_use').map((b) => b.name).filter(Boolean);
+    const tools = blocks.filter((b) => b?.type === 'tool_use').map(toolLabel);
     const text = blocks
       .filter((b) => typeof b?.text === 'string')
       .map((b) => b.text).join('\n').trim()

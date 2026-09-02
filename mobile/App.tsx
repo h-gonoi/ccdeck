@@ -1,30 +1,52 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, StatusBar, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, BackHandler, StatusBar, StyleSheet, View } from 'react-native';
+import { useFonts } from 'expo-font';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useDeck } from './src/deck';
+import Butler from './src/screens/Butler';
+import Lobby from './src/screens/Lobby';
 import Pair from './src/screens/Pair';
-import Deck from './src/screens/Deck';
-import Screen from './src/screens/Screen';
-import Sessions from './src/screens/Sessions';
+import Room from './src/screens/Room';
 import Settings from './src/screens/Settings';
 import { clearLink, loadLink, saveLink } from './src/store';
 import { C } from './src/theme';
-import type { Link, Session } from './src/types';
+import type { Link } from './src/types';
 
-type View_ = { name: 'list' } | { name: 'screen'; id: string } | { name: 'settings' };
+type Route = { name: 'lobby' } | { name: 'room'; id: string } | { name: 'settings' } | { name: 'butler' };
 
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <Shell />
+    </SafeAreaProvider>
+  );
+}
+
+function Shell() {
   const [ready, setReady] = useState(false);
   const [link, setLink] = useState<Link | null>(null);
-  const [view, setView] = useState<View_>({ name: 'list' });
+  const [route, setRoute] = useState<Route>({ name: 'lobby' });
+  // ドットフォント。読めなくても止めない（system にフォールバックして進む）
+  const [fontsLoaded, fontError] = useFonts({ DotGothic16: require('./assets/fonts/DotGothic16.ttf') });
 
   useEffect(() => { loadLink().then((saved) => { setLink(saved); setReady(true); }); }, []);
 
   const deck = useDeck(link);
 
-  async function link_(next: Link) { await saveLink(next); setLink(next); }
-  async function unlink() { await clearLink(); setLink(null); setView({ name: 'list' }); }
+  // Android の戻るキーはロビーへ。ロビーでは既定（アプリを閉じる）に任せる
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (route.name === 'lobby') return false;
+      setRoute({ name: 'lobby' });
+      return true;
+    });
+    return () => sub.remove();
+  }, [route.name]);
 
-  if (!ready) {
+  async function link_(next: Link) { await saveLink(next); setLink(next); }
+  async function unlink() { await clearLink(); setLink(null); setRoute({ name: 'lobby' }); }
+
+  if (!ready || (!fontsLoaded && !fontError)) {
     return (
       <View style={[s.fill, s.center]}>
         <StatusBar barStyle="light-content" />
@@ -42,16 +64,26 @@ export default function App() {
     );
   }
 
+  const room = route.name === 'room' ? deck.sessions.find((x) => x.id === route.id) : undefined;
+
   return (
     <View style={s.fill}>
       <StatusBar barStyle="light-content" />
-      {view.name === 'settings' ? (
-        <Settings link={link} up={deck.up} onUnlink={unlink} onRelink={link_}
-          onBack={() => setView({ name: 'list' })} />
+      {route.name === 'settings' ? (
+        <Settings link={link} up={deck.up} onUnlink={unlink} onRelink={link_} onBack={() => setRoute({ name: 'lobby' })} />
+      ) : route.name === 'butler' ? (
+        <Butler deck={deck} link={link} onBack={() => setRoute({ name: 'lobby' })} onOpen={(id) => setRoute({ name: 'room', id })} />
+      ) : room ? (
+        <Room key={room.id} session={room} deck={deck} onBack={() => setRoute({ name: 'lobby' })} />
       ) : (
-        /* 部屋割りの画面。ここが主役。
-           素のテキストで読む従来の画面は Screen.tsx に残してある。 */
-        <Deck deck={deck} onSettings={() => setView({ name: 'settings' })} />
+        /* 住人が帰った（セッションが消えた）ときもここに落ちる */
+        <Lobby
+          deck={deck}
+          label={link.label}
+          onOpen={(id) => setRoute({ name: 'room', id })}
+          onSettings={() => setRoute({ name: 'settings' })}
+          onButler={() => setRoute({ name: 'butler' })}
+        />
       )}
     </View>
   );
