@@ -5,7 +5,7 @@ set -e
 ROOT="${0:A:h:h}"
 PORT="${CCDECK_PORT:-7788}"
 URL="http://127.0.0.1:${PORT}"
-STATE_DIR="$HOME/.ccdeck"
+STATE_DIR="${CCDECK_HOME:-$HOME/.ccdeck}"
 LOG="$STATE_DIR/server.log"
 PID_FILE="$STATE_DIR/server.pid"
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"

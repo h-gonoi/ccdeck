@@ -9,7 +9,9 @@ const SKIP_DIRS = new Set([
   'target', '.git', 'coverage', '.cache',
 ]);
 
-export const CONFIG_DIR = path.join(os.homedir(), '.ccdeck');
+// 置き場は既定で ~/.ccdeck。CCDECK_HOME で差し替えられる（試験用に二つ目を立てるとき、
+// 台帳・端末・履歴を本番と混ぜないため）。bin/ccdeck の STATE_DIR も同じ変数を見る。
+export const CONFIG_DIR = process.env.CCDECK_HOME || path.join(os.homedir(), '.ccdeck');
 export const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 // 「最近使った」は設定ではなく履歴なので、手で書き換える config.json とは分けて持つ。
 export const RECENT_PATH = path.join(CONFIG_DIR, 'recent.json');
