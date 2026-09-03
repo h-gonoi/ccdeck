@@ -1316,11 +1316,20 @@ $('btn-pair').onclick = () => togglePairCode();
 $('btn-butler-agent').onclick = () => toggleButlerAgent();
 $('btn-rail').onclick = () => toggleRail();
 $('btn-tile').onclick = () => tileAll();
+/* スラッシュコマンドの送り方。先頭の / を打鍵として送り、残りを貼り付けてから Enter。
+   まとめて貼るとコマンドとして扱われないことがある。スマホ側（deck.ts の sendText）と
+   同じ順序・同じ間隔にしてある。片方だけ直すと、同じ操作が二通りになる。 */
+const GAP_MS = 60;
+function sendCommand(id, text) {
+  const ESC = String.fromCharCode(27);
+  send({ type: 'input', id, data: text[0] });
+  setTimeout(() => send({ type: 'input', id, data: `${ESC}[200~${text.slice(1)}${ESC}[201~` }), GAP_MS);
+  setTimeout(() => send({ type: 'input', id, data: '\r' }), GAP_MS * 2);
+}
+
 // モデルの切り替えは CLI に任せる。/model を開けば、その場の正しい一覧が出る
 $('btn-model').onclick = () => {
-  if (!state.activeId) return;
-  send({ type: 'input', id: state.activeId, data: '/model' });
-  setTimeout(() => send({ type: 'input', id: state.activeId, data: '\r' }), 80);
+  if (state.activeId) sendCommand(state.activeId, '/model');
 };
 $('stage-agent-claude').onclick = () => switchAgent('claude');
 $('stage-agent-codex').onclick = () => switchAgent('codex');
