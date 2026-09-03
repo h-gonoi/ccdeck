@@ -23,7 +23,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "scene": "node scripts/build-scene.mjs"
+    "scene": "node scripts/build-scene.mjs",
+    "test": "tsc --ignoreConfig src/prompt.ts src/markdown.ts --outDir .test-build --module commonjs --target es2020 --skipLibCheck && node --test test/"
   },
   "private": true
 }

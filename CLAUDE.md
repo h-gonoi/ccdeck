@@ -184,6 +184,9 @@ PC の窓が二つ以上あると、`sizeOwner` の通知 → 測り直して `r
 
 ### 問いの選択肢は「案内の行」から遡って組み立てる
 
+（ここの回帰テストは `mobile/test/prompt.test.js`。実画面 5 種で固定してある）
+
+
 Claude Code の問いは末尾から数行を切っても足りない。選択肢が 4 つ以上あると質問文と先頭の選択肢が
 画面の外に出るし、`/model` の一覧のように途中に別の行（`◉ xHigh effort`）が挟まることもある。
 `mobile/src/prompt.ts` は `Enter to select / Enter to confirm / Esc to cancel` の**案内の行**を起点に
@@ -298,7 +301,12 @@ HTTP からプロンプトやコマンドを受け取らず、サーバー内で
 5. サーバーを入れ替えたあと、前のセッションが同じ番号・同じ枠で戻るか
    （`~/.ccdeck/sessions.json` に載っていること、`vendorId` が埋まっていること）
 
-スマホまわりを触ったら、これも見る（`mobile/` で `npm run typecheck`、絵を直したら `npm run scene`）。
+スマホまわりを触ったら、これも見る（`mobile/` で `npm test` と `npm run typecheck`、絵を直したら `npm run scene`）。
+
+`npm test` は `parsePrompt` と `renderMarkdown` を、実際に採った画面（`mobile/test/screens/`）で固定している。
+**相手は Claude Code の描画で、こちらが決められない。** 枠線が一本増えれば壊れるので、
+壊れたら直す前にまず新しい画面を採って `test/screens/` に足すこと。画面は
+WebSocket で `attach { mode: 'text' }` して `snapshot` の `text` を落とせば採れる。
 
 - 呼ばれているセッションの部屋で、問いの箱が切り出されて「承認 ⏎ / 1 2 3 / Esc」が出ること
 - 話しかけた文章がそのまま届き、送信されること（改行を含む文章も。`!ls` が bash モードで動くこと）
