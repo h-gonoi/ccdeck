@@ -361,10 +361,11 @@ function dropViewer(id, ws) {
   else owners.delete(id);
 }
 
-// 消えたセッションの持ち主・見物人を片付ける
+// 消えたセッションの持ち主・見物人・嵐の記録を片付ける
 manager.on('sessions', () => {
   for (const id of [...owners.keys()]) if (!manager.get(id)) owners.delete(id);
   for (const id of [...viewers.keys()]) if (!manager.get(id)) viewers.delete(id);
+  for (const id of [...switches.keys()]) if (!manager.get(id)) switches.delete(id);
 });
 
 wss.on('connection', (ws) => {
