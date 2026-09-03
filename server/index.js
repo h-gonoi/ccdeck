@@ -26,7 +26,12 @@ const VERSION = JSON.parse(
 ).version;
 
 const app = express();
-app.use(express.json({ limit: '8mb' }));
+// 本文の上限。画像の受け口だけは広く取る（12MB の画像は base64 で約 16MB になる）。
+// ここを一つの上限で済ませると、upload 側の親切なエラーに届く前に express が 413 を返す。
+const parseJson = express.json({ limit: '8mb' });
+const parseUpload = express.json({ limit: '24mb' });
+const UPLOAD_PATH = '/api/files/upload';
+app.use((req, res, next) => (req.path === UPLOAD_PATH ? parseUpload : parseJson)(req, res, next));
 app.use(express.static(path.join(__dirname, '..', 'dist')));
 
 const manager = new SessionManager();
@@ -214,7 +219,7 @@ app.post('/api/files/write', wrap(async (req, res) => {
 const ATTACH_DIR = path.join(CONFIG_DIR, 'attachments');
 const ATTACH_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
 const ATTACH_MAX = 12 * 1024 * 1024;
-app.post('/api/files/upload', express.json({ limit: '20mb' }), wrap(async (req, res) => {
+app.post(UPLOAD_PATH, wrap(async (req, res) => {
   const ext = ATTACH_TYPES[req.body?.type];
   if (!ext) throw new Error('画像（png / jpeg / gif / webp）だけ受け付けます');
   const buf = Buffer.from(String(req.body?.data ?? ''), 'base64');
