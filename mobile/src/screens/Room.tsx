@@ -51,14 +51,15 @@ export default function Room({ session, deck, link, onBack }: Props) {
   const agentName = session.agent === 'codex' ? 'CODEX' : 'CLAUDE';
 
   const push = (payload: any) => web.current?.postMessage(JSON.stringify(payload));
-  const paint = () => {
-    if (!ready.current) return;
-    if (tab === 'screen' || legacy) {
-      push({ t: 'screen', text: screen === undefined ? '画面を受け取っています…' : (screen.replace(/\s+$/, '') || '（まだ何も描かれていません）') });
-      return;
-    }
-    if (chat === undefined) return push({ t: 'hint', text: '会話を受け取っています…' });
-    push({
+  const showScreen = tab === 'screen' || legacy;
+
+  /* 会話の HTML は会話が変わったときだけ組む。
+     呼ばれている間は text で見るので画面が毎秒 2 回届く。ここを毎回組み直すと、
+     24 発言ぶんの Markdown を秒 2 回作り直し、そのたびに WebView へ丸ごと送ることになる。
+     いちばん重くなってほしくないのが、まさに待たせている場面である。 */
+  const chatPayload = useMemo(() => (chat === undefined
+    ? { t: 'hint', text: '会話を受け取っています…' }
+    : {
       t: 'chat',
       empty: 'まだ会話がありません。下から話しかけられます。',
       turns: chat.map((turn) => ({
@@ -67,9 +68,17 @@ export default function Room({ session, deck, link, onBack }: Props) {
         html: turn.text ? renderMarkdown(turn.text) : '',
         tools: turn.tools ?? [],
       })),
-    });
-  };
-  useEffect(paint, [chat, screen, tab, legacy]);
+    }), [chat, agentName]);
+
+  // 画面を見ていないときは null。文字列なので、依存に置いても中身が同じなら描き直さない
+  const screenText = showScreen
+    ? (screen === undefined ? '画面を受け取っています…' : (screen.replace(/\s+$/, '') || '（まだ何も描かれていません）'))
+    : null;
+
+  const payload = showScreen ? { t: 'screen', text: screenText } : chatPayload;
+  const latest = useRef<any>(payload);
+  latest.current = payload;
+  useEffect(() => { if (ready.current) push(payload); }, [chatPayload, screenText, showScreen]);
 
   const key = (seq: string) => deck.sendKey(session.id, seq);
   const press = (option: PromptOption) => {
@@ -158,7 +167,7 @@ export default function Room({ session, deck, link, onBack }: Props) {
         onMessage={(e) => {
           let m: any;
           try { m = JSON.parse(e.nativeEvent.data); } catch { return; }
-          if (m.t === 'ready') { ready.current = true; paint(); }
+          if (m.t === 'ready') { ready.current = true; push(latest.current); }
           else if (m.t === 'error') console.warn('[chat]', m.msg);
         }}
         javaScriptEnabled
