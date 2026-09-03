@@ -182,12 +182,16 @@ function claudeSessionId(session, children) {
   return null;
 }
 
-function claudeTranscript(session, children) {
-  const id = claudeSessionId(session, children);
+// 会話 ID から記録の場所を引く。ID が判っていれば ps は要らない。
+function claudeFileById(cwd, id) {
   if (!id) return null;
-  const expected = path.join(claudeProjectDir(session.cwd), `${id}.jsonl`);
+  const expected = path.join(claudeProjectDir(cwd), `${id}.jsonl`);
   if (fs.existsSync(expected)) return expected;
   return findFile(path.join(claudeRoot(), 'projects'), (name) => name === `${id}.jsonl`);
+}
+
+function claudeTranscript(session, children) {
+  return claudeFileById(session.cwd, claudeSessionId(session, children));
 }
 
 function nearbyDays(at) {
@@ -372,7 +376,12 @@ export function prettyModel(id) {
 
 export function modelFor(session) {
   try {
-    const file = session.agent === 'claude' ? claudeTranscript(session) : codexTranscript(session);
+    /* 状態が変わるたびに呼ばれる。会話 ID がもう判っているなら、そこから記録へ直接辿る。
+       ここで claudeTranscript() を素通しすると、内部で PID から辿るために ps を起こし、
+       セッションの数だけプロセスを生やすことになる（このツールの値打ちは軽さなので割に合わない）。 */
+    const file = session.agent === 'claude'
+      ? (session.vendorId ? claudeFileById(session.cwd, session.vendorId) : claudeTranscript(session))
+      : codexTranscript(session);
     if (!file) return null;
     const stat = fs.statSync(file);
     const key = `${stat.size}:${stat.mtimeMs}`;
