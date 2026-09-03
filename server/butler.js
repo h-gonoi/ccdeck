@@ -243,7 +243,7 @@ class Butler extends EventEmitter {
     if (plan && (plan.state === 'assessing' || plan.state === 'running')) {
       throw new Error('執事はいま手が離せません。止めるか、終わるのを待ってください');
     }
-    if (plan?.state === 'paused' && plan.note.includes('上限')) {
+    if (plan?.state === 'paused' && plan.limited) {
       throw new Error('上限で止まっています。回復してから「続ける」を押してください');
     }
     const chosen = normalizeAgent(agent ?? this.state.agent);
@@ -268,6 +268,7 @@ class Butler extends EventEmitter {
       agent: chosen,
       state: 'assessing',
       note: '',
+      limited: false,      // 上限で止めたか。note の文言ではなくこれで判る
       items: dirs.map((cwd) => ({
         cwd, title: path.basename(cwd), situation: '', risk: '', steps: [],
         state: 'assessing', approved: true, error: null, cursor: 0,
@@ -454,6 +455,7 @@ class Butler extends EventEmitter {
 
     plan.state = 'running';
     plan.note = '';
+    plan.limited = false;   // 主人が「続ける」を押した。回復したものとして進む
     plan.approvedAt = Date.now();
     this.log(plan, '承認されました。手順を渡していきます');
     this.changed();
@@ -575,6 +577,7 @@ class Butler extends EventEmitter {
   hitLimit(plan, where) {
     if (plan.state === 'paused') return;
     plan.state = 'paused';
+    plan.limited = true;
     plan.note = `${where}で上限に達しました。回復してから「続ける」を押してください（勝手には進めません）`;
     this.log(plan, `上限に達したので止めました（${where}）`);
     this.changed();
