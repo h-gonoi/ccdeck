@@ -40,3 +40,6 @@ yarn-error.*
 /ios
 /android
 scene/preview.html
+
+# テストのためだけに TS を落とす場所
+.test-build/
