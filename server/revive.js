@@ -115,6 +115,18 @@ export function refresh(manager) {
   for (const session of sessions) {
     const id = vendorSessionId(session, children);
     if (id) session.vendorId = id;
+  }
+  refreshModels(manager);
+}
+
+/**
+ * モデルだけ読み直す。会話 ID が判っていれば ps を起こさず、
+ * 記録のサイズと更新時刻が変わっていなければ読みもしない。
+ * 状態が変わるたびに呼んでよい軽さなのは、この二つのおかげ。
+ */
+export function refreshModels(manager) {
+  for (const session of manager.sessions.values()) {
+    if (session.exitCode !== null) continue;
     const model = modelFor(session);
     if (model && model !== session.model) {
       session.model = model;
