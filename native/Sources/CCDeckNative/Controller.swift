@@ -2,7 +2,8 @@ import AppKit
 import UserNotifications
 
 /// 画面の状態を持つまとめ役。web/main.js の state と、それを動かす関数たちにあたる。
-final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation, DeckDelegate {
+final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation, DeckDelegate,
+                        UNUserNotificationCenterDelegate {
     let deck: Deck
     private var window: NSWindow!
     private let root = RootView()
@@ -98,6 +99,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMen
         }
         NSApp.activate(ignoringOtherApps: true)
         installSnapshotHook()
+        setUpNotifications()
     }
 
     // 確かめ用。CCDECK_SNAPSHOT=<path> で起こし、SIGUSR1 を送ると窓の中身だけを PNG に書く。
@@ -242,12 +244,27 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMen
     // 通知センターは .app に包んだときだけ使える（素の実行ファイルで触ると落ちる）。
     // 包んでいなければ Dock を跳ねさせるだけにする。
     private var canNotify: Bool { Bundle.main.bundleIdentifier != nil }
-    private var askedNotify = false
 
-    private func askNotifyOnce() {
-        guard canNotify, !askedNotify else { return }
-        askedNotify = true
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
+    // 許可は起動したときに求める。セッションを立てたときだけ求める形だと、
+    // 立てずに使っている間は一度も聞かれず、黙って何も届かない（実際にそうなった）。
+    private func setUpNotifications() {
+        guard canNotify else { return }
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .badge]) { granted, error in
+            DispatchQueue.main.async {
+                if let error {
+                    NSLog("ccdeck: 通知の許可を求められませんでした: %@", error.localizedDescription)
+                    self.toast("通知を使えません: \(error.localizedDescription)", seconds: 7)
+                } else if !granted {
+                    self.toast("通知が切られています。システム設定 › 通知 › ccdeck で入れられます", seconds: 7)
+                }
+                // 確かめ用。--notify-test で起こすと、許可のあとに一件だけ出す
+                if granted && CommandLine.arguments.contains("--notify-test") {
+                    self.notify(title: "ccdeck の通知", body: "通知センターに届いていれば成功です", id: "notify-test")
+                }
+            }
+        }
     }
 
     private func notify(title: String, body: String, id: String) {
@@ -256,7 +273,30 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMen
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+        content.userInfo = ["session": id]
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil)) { error in
+            if let error { NSLog("ccdeck: 通知を出せませんでした: %@", error.localizedDescription) }
+        }
+    }
+
+    // ccdeck が手前にあっても出す。既定のままだと、手前で別の枠を見ている間の「要対応」が届かない
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
+        done([.banner, .list])
+    }
+
+    // 通知を押したら、そのセッションを開く
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler done: @escaping () -> Void) {
+        let id = response.notification.request.content.userInfo["session"] as? String
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            self.window.makeKeyAndOrderFront(nil)
+            if let id, self.sessions.contains(where: { $0.id == id }) {
+                if self.panes.contains(id) { self.setActive(id) } else { self.selectSession(id) }
+            }
+            done()
+        }
     }
 
     // 要対応の件数は Dock のバッジに出す（ブラウザ版ではタブのタイトルに出していたもの）
@@ -426,7 +466,6 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMen
     // ---------- セッション ----------
 
     func openSession(cwd: String, title: String?, agent: String = "claude", resumeId: String? = nil) {
-        askNotifyOnce()   // 通知はセッションを立てる操作のついでに一度だけ求める
         let size = activeId.flatMap { paneViews[$0]?.size }
         Task { @MainActor in
             do {
