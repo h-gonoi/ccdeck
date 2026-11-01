@@ -410,3 +410,159 @@ export function conversationFor(session, limit = 24) {
     return [];
   }
 }
+
+/* ---------- 続きから開ける会話を並べる ----------
+   ＋ の「過去セッション」が使う。CLI が残した記録そのものを見るので、
+   ccdeck で立てたものでも、ターミナルで立てたものでも同じように出る。
+   記録の場所は agent ごとに違う:
+     Claude … ~/.claude/projects/<cwd を潰した名前>/<会話 ID>.jsonl
+     Codex  … ~/.codex/sessions/YYYY/MM/DD/rollout-<日時>-<会話 ID>.jsonl
+   cwd はファイルの中にしか無い（Claude の名前は潰してあり、元の綴りに戻せない）ので、
+   頭のほうだけ読んで拾う。 */
+
+const PAST_HEAD = 128 * 1024;   // 頭のここまでで cwd と最初の発言を探す
+const PAST_TTL = 5000;          // 続けて開いたときに走査し直さない
+const pastCache = new Map();    // agent -> { at, rows }
+
+function headLines(file, maxBytes = PAST_HEAD) {
+  const fd = fs.openSync(file, 'r');
+  try {
+    const buffer = Buffer.alloc(maxBytes);
+    const size = fs.readSync(fd, buffer, 0, maxBytes, 0);
+    return buffer.subarray(0, size).toString('utf8').split('\n');
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+// 人が打った文だけを見出しにしたい。CLI が自分で足す <system-reminder> や
+// <command-name> の類は、外すと空になることが多いので、そのときは次の発言を見る。
+function humanText(text) {
+  const bare = String(text ?? '').replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, ' ')
+    .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return bare.length > 120 ? `${bare.slice(0, 119)}…` : bare;
+}
+
+function claudeHead(file) {
+  let cwd = null;
+  let preview = '';
+  for (const line of headLines(file)) {
+    if (!line.trim()) continue;
+    let row;
+    try { row = JSON.parse(line); } catch { continue; }
+    if (!cwd && typeof row.cwd === 'string') cwd = row.cwd;
+    if (!preview && row.type === 'user' && !row.isSidechain) {
+      preview = humanText(contentText(row.message?.content));
+    }
+    if (cwd && preview) break;
+  }
+  return { cwd, preview };
+}
+
+// Codex は画像を base64 のまま同じ行に書くので、1 行が頭の読み取り幅を超えて
+// 途中で切れることがある。切れた行からでも本文だけは拾えるようにする。
+function textFromBroken(line) {
+  // 画像の直前に "<image …>" だけの塊が入ることがある。中身のある塊まで見る。
+  const all = line.matchAll(/"type"\s*:\s*"input_text"\s*,\s*"text"\s*:\s*("(?:[^"\\]|\\.)*")/g);
+  for (const hit of all) {
+    let text;
+    try { text = JSON.parse(hit[1]); } catch { continue; }
+    const bare = humanText(text);
+    if (bare) return bare;
+  }
+  return '';
+}
+
+function isCodexExec(file) {
+  try { return JSON.parse(readFirstLine(file)).payload?.source === 'exec'; } catch { return false; }
+}
+
+function codexHead(file, maxBytes = PAST_HEAD) {
+  let cwd = null;
+  let preview = '';
+  for (const line of headLines(file, maxBytes)) {
+    if (!line.trim()) continue;
+    let row;
+    try {
+      row = JSON.parse(line);
+    } catch {
+      if (!preview) preview = textFromBroken(line);
+      continue;
+    }
+    const payload = row.payload ?? {};
+    if (!cwd && row.type === 'session_meta' && typeof payload.cwd === 'string') cwd = payload.cwd;
+    if (!preview && row.type === 'response_item' && payload.role === 'user') {
+      preview = humanText(contentText(payload.content));
+    }
+    if (cwd && preview) break;
+  }
+  return { cwd, preview };
+}
+
+// 新しい順に並べたいだけなので、中身は開かずに mtime で拾う
+function jsonlFiles(dirs) {
+  const files = [];
+  for (const dir of dirs) {
+    let names;
+    try { names = fs.readdirSync(dir); } catch { continue; }
+    for (const name of names) {
+      if (!name.endsWith('.jsonl')) continue;
+      const file = path.join(dir, name);
+      try {
+        const stat = fs.statSync(file);
+        if (stat.size > 0) files.push({ file, at: stat.mtimeMs });
+      } catch { /* 消えた直後は飛ばす */ }
+    }
+  }
+  return files.sort((a, b) => b.at - a.at);
+}
+
+function subdirs(root, depth) {
+  if (depth === 0) return [root];
+  let names;
+  try { names = fs.readdirSync(root, { withFileTypes: true }); } catch { return []; }
+  return names.filter((e) => e.isDirectory())
+    .flatMap((e) => subdirs(path.join(root, e.name), depth - 1));
+}
+
+/**
+ * 続きから開ける会話を新しい順に返す。
+ * cwd が消えているものは外す（そこでは開けないので出しても押せない）。
+ */
+export function pastSessions(agent, limit = 30) {
+  const cached = pastCache.get(agent);
+  if (cached && Date.now() - cached.at < PAST_TTL) return cached.rows.slice(0, limit);
+
+  const claude = agent === 'claude';
+  // Codex は画像を base64 のまま同じ行に書くので、頭を広めに読まないと本文に届かない
+  const head = claude ? PAST_HEAD : PAST_HEAD * 4;
+  const dirs = claude
+    ? subdirs(path.join(claudeRoot(), 'projects'), 1)
+    : subdirs(codexRoot(), 3);          // sessions/YYYY/MM/DD
+
+  const rows = [];
+  for (const { file, at } of jsonlFiles(dirs)) {
+    if (rows.length >= limit) break;
+    const id = claude
+      ? path.basename(file, '.jsonl')
+      : UUID.exec(path.basename(file, '.jsonl'))?.[1];
+    if (!id) continue;
+    // codex exec（スキルやレビューが裏で回す非対話の実行）は続きから開きたい会話ではない。
+    // 実データでは一覧の 9 割近くを占め、人の会話を押し出していた。先頭行の session_meta だけで見分ける
+    if (!claude && isCodexExec(file)) continue;
+    let headInfo;
+    try { headInfo = claude ? claudeHead(file) : codexHead(file, head); } catch { continue; }
+    if (!headInfo.cwd) continue;
+    try { if (!fs.statSync(headInfo.cwd).isDirectory()) continue; } catch { continue; }
+    rows.push({
+      id,
+      agent,
+      cwd: headInfo.cwd,
+      name: path.basename(headInfo.cwd),
+      preview: headInfo.preview,
+      at: Math.round(at),
+    });
+  }
+  pastCache.set(agent, { at: Date.now(), rows });
+  return rows;
+}

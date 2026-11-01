@@ -715,6 +715,13 @@ button { font-family: inherit; cursor: pointer; }
   cursor: pointer;
 }
 .picker__item--on { background: var(--panel); color: var(--text); }
+/* 過去の会話は「場所 + いつ」の行の下に、打ち出しの一文を畳んで添える */
+.picker__item--past { flex-wrap: wrap; row-gap: 2px; }
+.picker__preview {
+  flex-basis: 100%;
+  font-size: 11px; color: var(--dim); opacity: .8;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .picker__name {
   flex: 1; min-width: 0;
   font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

@@ -15,6 +15,7 @@ export const api = {
   health: () => request('/api/health'),
   projects: () => request('/api/projects'),
   sessions: () => request('/api/sessions'),
+  past: (agent) => request(`/api/past?agent=${encodeURIComponent(agent)}`),
   createSession: (body) => post('/api/sessions', body),
   handoffSession: (id, agent) => post(`/api/sessions/${id}/handoff`, { agent }),
   killSession: (id) => request(`/api/sessions/${id}`, { method: 'DELETE' }),
