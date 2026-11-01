@@ -251,7 +251,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMen
         guard canNotify else { return }
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        center.requestAuthorization(options: [.alert, .badge]) { granted, error in
+        center.requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
             DispatchQueue.main.async {
                 if let error {
                     NSLog("ccdeck: 通知の許可を求められませんでした: %@", error.localizedDescription)
@@ -274,6 +274,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMen
         content.title = title
         content.body = body
         content.userInfo = ["session": id]
+        content.sound = .default   // 「あなたの番」は気づいてほしいので鳴らす（ブラウザ版は無音だった）
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil)) { error in
             if let error { NSLog("ccdeck: 通知を出せませんでした: %@", error.localizedDescription) }
         }
@@ -282,7 +283,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMen
     // ccdeck が手前にあっても出す。既定のままだと、手前で別の枠を見ている間の「要対応」が届かない
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
-        done([.banner, .list])
+        done([.banner, .list, .sound])
     }
 
     // 通知を押したら、そのセッションを開く
