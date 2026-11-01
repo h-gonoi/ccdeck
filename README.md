@@ -224,6 +224,10 @@ web/
   main.js      画面の状態管理
   term.js      xterm.js の管理
   editor.js    CodeMirror（開いたときだけ読み込む）
+native/
+  Sources/     ネイティブ版の画面（AppKit + SwiftTerm）。build-app で .app に包む
+icon/
+  *.svg        アプリとメニューバーのアイコン。render で out/ に書き出す（書き出しも入れてある）
 docs/
   mobile-sync.md  スマホ同期の仕様と段階
 mobile/
@@ -275,6 +279,20 @@ ccdeck はセッションを何本立ててもサーバーは 1 プロセスの�
 npm run build     # web/ をビルド
 npm start         # サーバーを直接起動
 ```
+
+## ネイティブ版（Chrome を使わない画面）
+
+PC の画面を AppKit と SwiftTerm で描いたもの。Chrome も WebView も使わず、
+ブラウザ版と同じサーバーに繋ぐ。一覧・並べて表示・執事・git の引き出しなど、
+ブラウザ版の機能はひととおり使える。要対応は通知センターに音つきで届く。
+
+```sh
+cd native && ./build-app        # → native/build/ccdeck-native.app（Swift 5.9 / macOS 13 以降）
+```
+
+`native/build/ccdeck-native.app` があれば、`ccdeck open` とメニューバーの「開く」は
+こちらを開く。無ければ従来どおり Chrome の `--app` で開く。
+試験用のサーバーに繋ぐときは `open native/build/ccdeck-native.app --args --port 7799`。
 
 ## スマホから使う（M2）
 
