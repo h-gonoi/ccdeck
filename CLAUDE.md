@@ -120,6 +120,21 @@ Codex は**画像を base64 のまま同じ行に書く**ので、頭の読み�
 走っている会話は一覧から外す（画面側で `vendorId` と突き合わせる）。
 **同じ会話に CLI を二重にぶら下げると、どちらの書き込みも壊れる。**
 
+### 入れ替えは「手が空くのを待つ」で、今すぐは置かない
+
+`server/upgrade.js` が `server/*.js` と `package.json` を `fs.watch` で見張り、起動時と中身が違えば
+「新しい版あり」にする。「手が空いたら入れ替える」を押すと、次の条件が 15 秒続いた瞬間に、
+自分と同じ引数でサーバーを立て直す（`restartSelf`。新しい方は `CCDECK_WAIT_PORT` でポートの空きを待つ）。
+
+- 全セッションが `idle` か終了（`starting` / `running` / `attention` は待つ）
+- 打ちかけの入力が無い。打鍵の**中身は持たず**、最後の打鍵が Enter / Ctrl-C で終わったかだけを見る。
+  フォーカスの出入り（`ESC [ I` / `ESC [ O`）は打鍵ではない。放置が 10 分を超えた打ちかけはもう待たない
+- 執事の手順（`plan.state === 'running'`）と見立て（`assessing`）の途中でない
+
+**「今すぐ入れ替える」を足さないこと。** それは `ccdeck stop` と同じで、作業の途中を殺す。
+押せるのは `localOnly`（LAN のスマホからは不可）。入れ替えで立て直したサーバーは自分で
+`server.pid` を書く（`bin/ccdeck` が書けないため）。
+
 ### CSS の落とし穴
 
 - `hidden` 属性は `display: flex` などに負ける。`[hidden] { display: none !important }` が要る

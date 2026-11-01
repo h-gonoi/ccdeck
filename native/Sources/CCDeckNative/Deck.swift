@@ -94,6 +94,7 @@ protocol DeckDelegate: AnyObject {
     func deckReplay(id: String, data: String)
     func deckOutput(id: String, data: String)
     func deckSizeOwner(id: String, mine: Bool, cols: Int, rows: Int)
+    func deckUpgrade(_ state: JSON?)
 }
 
 /// ccdeck サーバーとのつながり。ブラウザ版の main.js の WebSocket と api.js にあたる。
@@ -182,6 +183,8 @@ final class Deck {
             if let list = decode([External].self, msg["sessions"]) { delegate?.deckExternal(list) }
         case "butler":
             delegate?.deckButler(msg["state"] as? JSON)
+        case "upgrade":
+            delegate?.deckUpgrade(msg["state"] as? JSON)
         case "replay", "snapshot":
             delegate?.deckReplay(id: id, data: msg["data"] as? String ?? "")
         case "output":
@@ -300,5 +303,8 @@ final class Deck {
     func butlerStep(planId: Any, cwd: String, index: Int, instruction: String) async throws {
         _ = try await postJSON("api/butler/step", ["planId": planId, "cwd": cwd, "index": index, "instruction": instruction])
     }
+    func upgradeArm() async throws { _ = try await postJSON("api/upgrade/arm") }
+    func upgradeCancel() async throws { _ = try await postJSON("api/upgrade/cancel") }
+
     func butlerConfig(agent: String) async throws { _ = try await postJSON("api/butler/config", ["agent": agent]) }
 }

@@ -22,6 +22,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMen
     var confirmRevoke: String?
     var handoffBusy = false
     var butler: JSON?
+    var upgrade: JSON?                // 新しい版の知らせと、入れ替えの待ち状況（server/upgrade.js）
     var butlerPick: Set<String>?      // 見立てに出すプロジェクト。nil は未選択＝既定
     var butlerOpen = Set<String>()    // 提案で本文を開いている手順 "cwd#index"
     var butlerEdit: String?           // 書き換え中の手順 "cwd#index"
@@ -210,6 +211,16 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMen
         }
         root.rail.renderButler()
     }
+
+    func deckUpgrade(_ state: JSON?) {
+        upgrade = state
+        root.rail.renderUpgrade()
+    }
+
+    // 入れ替えると走っているセッションは死ぬ（手が空いていれば台帳から続きで戻る）。
+    // だから「今すぐ」は置かず、全員の手が空くのをサーバーに待ってもらう。
+    func armUpgrade() { butlerRun { try await self.deck.upgradeArm() } }
+    func cancelUpgrade() { butlerRun { try await self.deck.upgradeCancel() } }
 
     func deckReplay(id: String, data: String) { paneViews[id]?.replay(data) }
     func deckOutput(id: String, data: String) { paneViews[id]?.write(data) }

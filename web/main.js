@@ -62,11 +62,37 @@ function connect() {
     else if (msg.type === 'output') pool.write(msg.id, msg.data);
     else if (msg.type === 'sizeOwner') onSizeOwner(msg);
     else if (msg.type === 'butler') onButler(msg.state);
+    else if (msg.type === 'upgrade') renderUpgrade(msg.state);
   };
   ws.onopen = () => { attached.clear(); needResync = true; };
   ws.onclose = () => setTimeout(connect, 1200); // サーバー再起動に自力で追従する
 }
 const send = (payload) => ws?.readyState === 1 && ws.send(JSON.stringify(payload));
+
+// ---- 新しい版への入れ替え ----
+// 入れ替えると走っているセッションは死ぬ（手が空いていれば台帳から続きで戻る）。
+// だから「今すぐ」は置かず、全員の手が空くのをサーバーに待ってもらう。
+const WAIT_REASON = {
+  starting: '起動中', running: '作業中', attention: '承認待ち', draft: '打ちかけ', butler: '見立て・手順の途中',
+};
+
+function renderUpgrade(up) {
+  const box = $('upgrade');
+  box.hidden = !up?.stale && !up?.restarting;
+  if (box.hidden) return;
+  let text = '新しい版があります。';
+  if (up.restarting) text = '入れ替えています…';
+  else if (up.armed && up.waiting.length) {
+    const who = up.waiting.map((w) => `${w.title ?? w.id}（${WAIT_REASON[w.reason] ?? w.reason}）`).join('、');
+    text = `手が空くのを待っています: ${who}`;
+  } else if (up.armed) text = '全員の手が空いています。まもなく入れ替えます。';
+  $('upgrade-text').textContent = text;
+  $('upgrade-arm').hidden = up.armed || up.restarting;
+  $('upgrade-cancel').hidden = !up.armed || up.restarting;
+}
+
+$('upgrade-arm').onclick = () => api.upgradeArm().then(renderUpgrade).catch((err) => toast(err.message));
+$('upgrade-cancel').onclick = () => api.upgradeCancel().then(renderUpgrade).catch((err) => toast(err.message));
 
 // 起動時に前回の続きを起こしていたら一度だけ伝える。
 // 繋ぎ直すたびに言われても仕方がないので、このタブで一回きり。
