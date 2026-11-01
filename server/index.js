@@ -12,7 +12,7 @@ import { CONFIG_DIR, scan, loadConfig, saveConfig, touchRecent } from './project
 import { listExternal, focusTty } from './external.js';
 import * as auth from './auth.js';
 import * as revive from './revive.js';
-import { conversationFor } from './transcripts.js';
+import { conversationFor, pastSessions } from './transcripts.js';
 import { createButler } from './butler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -108,6 +108,12 @@ app.post('/api/config', wrap(async (req, res) => res.json(await saveConfig(req.b
 
 // ---- セッション ----
 app.get('/api/sessions', (req, res) => res.json(manager.list()));
+
+// 続きから開ける会話。CLI の記録をそのまま並べるので、ターミナルで立てたものも出る。
+app.get('/api/past', wrap(async (req, res) => {
+  const agent = normalizeAgent(req.query.agent);
+  res.json(pastSessions(agent, 30));
+}));
 
 app.post('/api/sessions', wrap(async (req, res) => {
   const { cwd, title, cols, rows, resumeId } = req.body;

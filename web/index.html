@@ -123,6 +123,13 @@
 
   <!-- ＋ から出るプロジェクト選び。モーダルではなく、外を押せば消える板。 -->
   <div class="picker" id="picker" hidden>
+    <div class="picker__agents" role="radiogroup" aria-label="起動の仕方">
+      <span class="picker__agents-label">起動</span>
+      <button class="picker__agent picker__agent--on" id="picker-mode-new"
+              type="button" role="radio" aria-checked="true">新規</button>
+      <button class="picker__agent" id="picker-mode-past"
+              type="button" role="radio" aria-checked="false">過去セッション</button>
+    </div>
     <div class="picker__agents" role="radiogroup" aria-label="Agent">
       <span class="picker__agents-label">Agent</span>
       <button class="picker__agent picker__agent--on" id="picker-agent-claude"

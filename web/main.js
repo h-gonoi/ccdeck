@@ -32,7 +32,12 @@ const state = {
 };
 
 // ＋ から出すプロジェクト選び。開いている間だけ使う状態。
-const picker = { open: false, query: '', index: 0, items: [], agent: 'claude' };
+// mode: 'new' … プロジェクトを選んで新しく立てる（既定）
+//       'past' … CLI が残した会話を選んで続きから開く
+const picker = {
+  open: false, query: '', index: 0, items: [], agent: 'claude',
+  mode: 'new', past: [], loading: false, pastError: '',
+};
 
 // ---------- WebSocket ----------
 let ws = null;
@@ -246,11 +251,11 @@ function updateBadge() {
   document.title = waiting ? `(${waiting}) ccdeck` : unread ? `• ccdeck` : 'ccdeck';
 }
 
-async function openSession(cwd, title, agent = 'claude') {
+async function openSession(cwd, title, agent = 'claude', resumeId = null) {
   // 通知はセッションを立てる操作のついでに一度だけ求める（初回クリックを奪わない）
   if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
   const { cols, rows } = pool.size(state.activeId);
-  const session = await api.createSession({ cwd, title, agent, cols, rows });
+  const session = await api.createSession({ cwd, title, agent, cols, rows, resumeId });
   markRecent(cwd);
   // 並べている最中なら、そこに足す方が自然
   if (state.panes.length > 1 && state.panes.length < 12) {
@@ -691,6 +696,9 @@ function openPicker() {
   picker.open = true;
   picker.query = '';
   picker.agent = 'claude';
+  picker.mode = 'new';
+  picker.past = [];
+  picker.pastError = '';
   // いま打っているセッションの場所を最初に当てておく（⌘N → Enter で「もう1本」）
   const active = state.sessions.find((s) => s.id === state.activeId);
   picker.index = Math.max(0, state.projects.findIndex((p) => p.path === active?.cwd));
@@ -698,6 +706,7 @@ function openPicker() {
   const input = $('picker-input');
   input.value = '';
   $('picker').hidden = false;
+  renderPickerMode();
   renderPickerAgent();
   renderPicker();
   placePicker();
@@ -724,10 +733,60 @@ function placePicker() {
 
 function pickerMatches() {
   const q = picker.query.trim().toLowerCase();
+  if (picker.mode === 'past') {
+    if (!q) return picker.past;
+    return picker.past.filter((row) => `${row.name} ${row.cwd} ${row.preview}`.toLowerCase().includes(q));
+  }
   if (!q) return state.projects;
   return state.projects.filter(
     (p) => p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q),
   );
+}
+
+function renderPickerMode() {
+  for (const mode of ['new', 'past']) {
+    const button = $(`picker-mode-${mode}`);
+    const selected = picker.mode === mode;
+    button.classList.toggle('picker__agent--on', selected);
+    button.setAttribute('aria-checked', String(selected));
+  }
+  $('picker-input').placeholder = picker.mode === 'past' ? '会話を探す' : 'プロジェクトを選ぶ';
+}
+
+function selectPickerMode(mode) {
+  if (picker.mode === mode) return;
+  picker.mode = mode;
+  picker.index = 0;
+  renderPickerMode();
+  renderPicker();
+  if (mode === 'past') loadPast();
+  $('picker-input').focus();
+}
+
+// 続きから開ける会話を取りに行く。走っている会話は外す
+// （同じ会話に CLI を二重にぶら下げると、どちらの書き込みも壊れる）。
+async function loadPast() {
+  const agent = picker.agent;
+  picker.loading = true;
+  picker.past = [];
+  picker.pastError = '';
+  renderPicker();
+  let rows = [];
+  try {
+    rows = await api.past(agent);
+  } catch (err) {
+    // この口を知らないサーバー（入れ替え前）だと 404 が返る。
+    // 「会話がありません」と出すと記録の側を疑わせるので、そうと判る文にする。
+    picker.pastError = /404/.test(String(err?.message ?? ''))
+      ? 'このサーバーはまだ対応していません（stop → start で入れ替えてください）。'
+      : '過去の会話を読めませんでした。';
+  }
+  if (!picker.open || picker.agent !== agent || picker.mode !== 'past') return;
+  const live = new Set(state.sessions.map((s) => s.vendorId).filter(Boolean));
+  picker.past = rows.filter((row) => !live.has(row.id));
+  picker.loading = false;
+  picker.index = 0;
+  renderPicker();
 }
 
 function renderPickerAgent() {
@@ -743,6 +802,7 @@ function selectPickerAgent(agent) {
   picker.agent = agent;
   renderPickerAgent();
   renderPicker();
+  if (picker.mode === 'past') loadPast();
   $('picker-input').focus();
 }
 
@@ -752,7 +812,12 @@ function renderPicker() {
 
   const list = $('picker-list');
   list.innerHTML = '';
-  $('picker-empty').hidden = picker.items.length > 0;
+  const empty = $('picker-empty');
+  empty.hidden = picker.items.length > 0;
+  empty.textContent = picker.mode === 'past'
+    ? (picker.loading ? '探しています…' : picker.pastError || '続きから開ける会話がありません。')
+    : '合うプロジェクトがありません。';
+  if (picker.mode === 'past') return renderPastRows(list);
   const cut = recentCount(picker.items);
 
   picker.items.forEach((p, index) => {
@@ -790,11 +855,43 @@ function renderPicker() {
   });
 }
 
-function choose(project) {
-  if (!project) return;
+// 会話は「どこで」動いていたかまで記録に入っている。場所はそれに従う。
+function renderPastRows(list) {
+  picker.items.forEach((row, index) => {
+    const li = document.createElement('li');
+    li.className = `picker__item picker__item--past${index === picker.index ? ' picker__item--on' : ''}`;
+    li.title = row.cwd;
+    li.onmousemove = () => {
+      if (picker.index === index) return;
+      picker.index = index;
+      renderPicker();
+    };
+    li.onclick = () => choose(row);
+
+    li.appendChild(Object.assign(document.createElement('span'), {
+      className: 'picker__name', textContent: row.name,
+    }));
+    li.appendChild(Object.assign(document.createElement('span'), {
+      className: 'picker__when', textContent: relTime(row.at),
+    }));
+    if (row.preview) {
+      li.appendChild(Object.assign(document.createElement('span'), {
+        className: 'picker__preview', textContent: row.preview,
+      }));
+    }
+
+    list.appendChild(li);
+    if (index === picker.index) requestAnimationFrame(() => li.scrollIntoView({ block: 'nearest' }));
+  });
+}
+
+function choose(item) {
+  if (!item) return;
   const agent = picker.agent;
+  const past = picker.mode === 'past';
   closePicker();
-  openSession(project.path, project.name, agent);
+  if (past) openSession(item.cwd, item.name, agent, item.id);
+  else openSession(item.path, item.name, agent);
 }
 
 // ---------- スマホを繋ぐ ----------
@@ -1281,6 +1378,8 @@ function toast(text, ms = 3200) {
 
 // ---------- イベント ----------
 $('btn-new').onclick = () => (picker.open ? closePicker() : openPicker());
+$('picker-mode-new').onclick = () => selectPickerMode('new');
+$('picker-mode-past').onclick = () => selectPickerMode('past');
 $('picker-agent-claude').onclick = () => selectPickerAgent('claude');
 $('picker-agent-codex').onclick = () => selectPickerAgent('codex');
 

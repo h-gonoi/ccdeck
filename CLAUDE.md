@@ -106,6 +106,20 @@ TUI の枠が崩れる。`syncPanes()` は **setVisible（fit して resize 送�
 会話 ID は `~/.claude/sessions/<PID>.json` から引く。`/clear` などで途中から変わるので、
 60 秒ごとに読み直している。起動直後はまだ書かれていないので、5 秒後と 20 秒後にも拾いに行く。
 
+### 過去の会話は「記録の頭」から場所を読む
+
+＋ の「過去セッション」（`server/transcripts.js` の `pastSessions`）は CLI の記録を並べる。
+置き場は agent で違い、**どちらも cwd はファイルの中にしかない**。
+Claude の `~/.claude/projects/<cwd を潰した名前>/` はハイフンに潰してあって元の綴りに戻せず、
+Codex の `rollout-<日時>-<ID>.jsonl` は名前に場所を持たない。だから頭だけ読んで `cwd` を拾う。
+
+Codex は**画像を base64 のまま同じ行に書く**ので、頭の読み取り幅で 1 行が途中で切れる。
+`JSON.parse` が落ちた行からも本文だけは拾えるようにしてある（`textFromBroken`）。
+ここを「切れた行は捨てる」に戻すと、画像を貼った会話の見出しが全部空になる。
+
+走っている会話は一覧から外す（画面側で `vendorId` と突き合わせる）。
+**同じ会話に CLI を二重にぶら下げると、どちらの書き込みも壊れる。**
+
 ### CSS の落とし穴
 
 - `hidden` 属性は `display: flex` などに負ける。`[hidden] { display: none !important }` が要る
