@@ -236,6 +236,9 @@ function codexTranscript(session) {
 
 // rollout-2026-08-26T23-32-37-<uuid>.jsonl の末尾が resume に使う ID
 function codexSessionId(session) {
+  // resume で続けている会話は、始めた日の記録に書き足される（ID は変わらない）。
+  // 開始時刻で探すと、後から同じ場所で立てた別の会話を拾ってしまうので、判っている ID を使う。
+  if (session.resumeId) return session.resumeId;
   const file = codexTranscript(session);
   if (!file) return null;
   return UUID.exec(path.basename(file, '.jsonl'))?.[1] ?? null;
@@ -258,22 +261,18 @@ export function vendorSessionId(session, children) {
 /**
  * その ID がまだ resume できるか。
  * 消えた会話を --resume に渡すと CLI が即座に落ちるので、渡す前にここで確かめる。
- * createdAt は Codex の日付ディレクトリを絞るためのヒント（無ければ今日の前後を見る）。
  */
-export function resumeAvailable(agent, cwd, id, createdAt = Date.now()) {
+export function resumeAvailable(agent, cwd, id) {
   if (!id || !cwd) return false;
   try {
     if (agent === 'claude') {
       if (fs.existsSync(path.join(claudeProjectDir(cwd), `${id}.jsonl`))) return true;
       return Boolean(findFile(path.join(claudeRoot(), 'projects'), (name) => name === `${id}.jsonl`));
     }
-    for (const parts of nearbyDays(createdAt)) {
-      const dir = path.join(codexRoot(), ...parts);
-      let names;
-      try { names = fs.readdirSync(dir); } catch { continue; }
-      if (names.some((name) => name.endsWith(`${id}.jsonl`))) return true;
-    }
-    return false;
+    // Codex は日付ごとのディレクトリに置くが、その日付は会話を始めた日であって
+    // 復元した日ではない。何日目かを推測すると外すので、ID で素直に探す
+    // （実測 3736 件・10ms。起動時に数本ぶん呼ぶだけなので割に合う）。
+    return Boolean(findFile(codexRoot(), (name) => name.endsWith(`${id}.jsonl`)));
   } catch {
     return false;
   }
