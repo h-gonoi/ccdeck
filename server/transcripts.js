@@ -473,6 +473,10 @@ function textFromBroken(line) {
   return '';
 }
 
+function isCodexExec(file) {
+  try { return JSON.parse(readFirstLine(file)).payload?.source === 'exec'; } catch { return false; }
+}
+
 function codexHead(file, maxBytes = PAST_HEAD) {
   let cwd = null;
   let preview = '';
@@ -543,6 +547,9 @@ export function pastSessions(agent, limit = 30) {
       ? path.basename(file, '.jsonl')
       : UUID.exec(path.basename(file, '.jsonl'))?.[1];
     if (!id) continue;
+    // codex exec（スキルやレビューが裏で回す非対話の実行）は続きから開きたい会話ではない。
+    // 実データでは一覧の 9 割近くを占め、人の会話を押し出していた。先頭行の session_meta だけで見分ける
+    if (!claude && isCodexExec(file)) continue;
     let headInfo;
     try { headInfo = claude ? claudeHead(file) : codexHead(file, head); } catch { continue; }
     if (!headInfo.cwd) continue;
