@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# icon/*.svg から、アプリとメニューバーが読む画像を書き出す。out/ はリポジトリに入れてある
+# （rsvg-convert の無い環境でもメニューバーアプリを組み立てられるように）。SVG を直したら流し直す。
+#   要るもの: rsvg-convert, magick, iconutil
+set -euo pipefail
+cd "$(dirname "$0")"
+OUT=out
+rm -rf "$OUT" && mkdir -p "$OUT"
+
+# ---- アプリのアイコン（.icns） ----
+SET=$(mktemp -d)/AppIcon.iconset
+mkdir -p "$SET"
+for s in 16 32 128 256 512; do
+  rsvg-convert -w $s -h $s app-icon.svg -o "$SET/icon_${s}x${s}.png"
+  rsvg-convert -w $((s * 2)) -h $((s * 2)) app-icon.svg -o "$SET/icon_${s}x${s}@2x.png"
+done
+iconutil -c icns "$SET" -o "$OUT/AppIcon.icns"
+
+# ---- メニューバー（18pt と @2x） ----
+# menubar      … テンプレート。明暗は macOS が塗り直す
+# attention-*  … 「あなたの番」。琥珀は焼き込み、それ以外はメニューバーの文字色で塗るので二枚に分ける
+for scale in 1 2; do
+  px=$((18 * scale)); suffix=$([ $scale = 2 ] && echo "@2x" || echo "")
+  rsvg-convert -w $px -h $px menubar.svg -o "$OUT/menubar$suffix.png"
+  # SVG の段階で分ける（色で抜くと縁のにじみが線になって残る）
+  base=$(mktemp).svg; amber=$(mktemp).svg
+  sed 's/fill="#e0a145"/fill="none"/g' menubar-attention.svg > "$base"        # 琥珀の一画を消す
+  sed 's/stroke="#000000"/stroke="none"/g' menubar-attention.svg > "$amber"  # 線を消して琥珀だけ残す
+  rsvg-convert -w $px -h $px "$base" -o "$OUT/menubar-attention-base$suffix.png"
+  rsvg-convert -w $px -h $px "$amber" -o "$OUT/menubar-attention-amber$suffix.png"
+done
+ls "$OUT"

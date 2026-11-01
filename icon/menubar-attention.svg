@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" role="img" aria-labelledby="title desc">
+  <title id="title">ccdeck menu bar attention icon</title>
+  <desc id="desc">Three bundled panes with one amber active pane.</desc>
+  <defs>
+    <clipPath id="frontInterior">
+      <rect x="9" y="7" width="6.5" height="8" rx="1.25"/>
+    </clipPath>
+  </defs>
+  <g fill="none" stroke="#000000" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M8.5 3.25H3.25a2 2 0 0 0-2 2v5.5a2 2 0 0 0 2 2h1.5"/>
+    <path d="M12 4.75H6.75a2 2 0 0 0-2 2v5.5a2 2 0 0 0 2 2h1.5"/>
+  </g>
+  <g clip-path="url(#frontInterior)">
+    <rect x="12.25" y="11.5" width="3.25" height="3.5" fill="#e0a145"/>
+    <path d="M9 11.5H15.5" fill="none" stroke="#000000" stroke-width="1.5"/>
+  </g>
+  <rect x="8.25" y="6.25" width="8" height="9.5" rx="2" fill="none" stroke="#000000" stroke-width="1.5" stroke-linejoin="round"/>
+</svg>
