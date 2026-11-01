@@ -2,6 +2,7 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import http from 'node:http';
 import fsSync from 'node:fs';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +15,7 @@ import * as auth from './auth.js';
 import * as revive from './revive.js';
 import { conversationFor, pastSessions } from './transcripts.js';
 import { createButler } from './butler.js';
+import { createUpgrade } from './upgrade.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.CCDECK_PORT) || 7788;
@@ -36,6 +38,20 @@ app.use(express.static(path.join(__dirname, '..', 'dist')));
 
 const manager = new SessionManager();
 const butler = createButler({ manager });
+
+// 新しい版への入れ替え。手が空くのを待ってから、自分と同じ引数で立て直す。
+// 新しい方は古い方がポートを手放すまで待つ（CCDECK_WAIT_PORT）。
+const ROOT = path.join(__dirname, '..');
+const restartSelf = () => {
+  const log = fsSync.openSync(path.join(CONFIG_DIR, 'server.log'), 'a');
+  spawn(process.execPath, process.argv.slice(1), {
+    cwd: ROOT, detached: true, stdio: ['ignore', log, log],
+    env: { ...process.env, CCDECK_WAIT_PORT: '1' },
+  }).unref();
+  console.log('新しい版に入れ替えます');
+  shutdown();
+};
+const upgrade = createUpgrade({ root: ROOT, manager, butler, restart: restartSelf });
 
 // 起動時に前回の続きを起こした結果。画面に一度だけ伝えるために持っておく。
 const revived = { total: 0, resumed: 0, dropped: 0 };
@@ -77,7 +93,7 @@ app.get('/api/health', (req, res) => res.json({
   address: LAN ? auth.lanAddress() : '127.0.0.1',
   port: PORT,
   agents: Object.keys(AGENT_COMMANDS),
-  capabilities: ['sessions', 'external', 'git', 'files', 'pair', 'butler'],
+  capabilities: ['sessions', 'external', 'git', 'files', 'pair', 'butler', 'upgrade'],
 }));
 
 // ---- 端末 ----
@@ -105,6 +121,13 @@ app.post('/api/push/register', wrap(async (req, res) => {
 app.get('/api/projects', wrap(async (req, res) => res.json(await scan())));
 app.get('/api/config', wrap(async (req, res) => res.json(await loadConfig())));
 app.post('/api/config', wrap(async (req, res) => res.json(await saveConfig(req.body))));
+
+// ---- 入れ替え ----
+// 入れ替えると走っているセッションは全部死ぬ（手が空いていれば台帳から続きで戻る）。
+// だから押せるのはこの Mac の前に座っている人だけ。
+app.get('/api/upgrade', (req, res) => res.json(upgrade.toJSON()));
+app.post('/api/upgrade/arm', localOnly, (req, res) => { upgrade.arm(); res.json(upgrade.toJSON()); });
+app.post('/api/upgrade/cancel', localOnly, (req, res) => { upgrade.cancel(); res.json(upgrade.toJSON()); });
 
 // ---- セッション ----
 app.get('/api/sessions', (req, res) => res.json(manager.list()));
@@ -267,6 +290,7 @@ const broadcast = (payload) => {
 
 manager.on('sessions', () => broadcast({ type: 'sessions', sessions: manager.list() }));
 butler.on('change', () => broadcast({ type: 'butler', state: butler.toJSON() }));
+upgrade.on('change', (state) => broadcast({ type: 'upgrade', state }));
 
 // /model で切り替えた直後に表示が追いつくよう、状態が落ち着いたら読み直す。
 // モデルだけを見る軽い方を呼ぶ（refresh() は ps を起こすので 60 秒ごとのままにする）。
@@ -385,6 +409,7 @@ wss.on('connection', (ws) => {
   send({ type: 'hello', buildId: BUILD_ID, revived });
   send({ type: 'sessions', sessions: manager.list() });
   send({ type: 'butler', state: butler.toJSON() });
+  send({ type: 'upgrade', state: upgrade.toJSON() });
   listExternal(ownPids()).then((list) => send({ type: 'external', sessions: list })).catch(() => {});
 
   const detach = (id) => {
@@ -458,6 +483,7 @@ wss.on('connection', (ws) => {
         // 打鍵の中身は残さない（パスワードが混ざる）。触り始めたことだけ一度書く。
         if (!typed.has(msg.id)) { typed.add(msg.id); auth.audit(ws.who, 'input', session.cwd); }
         session.write(msg.data);
+        upgrade.noteInput(msg.id, msg.data);
         break;
       }
       case 'resize': {
@@ -538,7 +564,19 @@ try {
 // ここから先は、生きているセッションを台帳に書き続ける
 revive.follow(manager);
 
+// 入れ替えで立て直された側は、古い方がポートを手放すまで少し待つ（最大 15 秒）
+let listenTries = 0;
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE' && process.env.CCDECK_WAIT_PORT === '1' && listenTries++ < 60) {
+    setTimeout(() => server.listen(PORT, HOST), 250);
+    return;
+  }
+  throw err;
+});
+
 server.listen(PORT, HOST, () => {
+  // ccdeck stop が自分を見つけられるように（入れ替えで立て直したときは bin/ccdeck が書けない）
+  try { fsSync.writeFileSync(path.join(CONFIG_DIR, 'server.pid'), String(process.pid)); } catch { /* 無くても stop は cwd で探す */ }
   if (!LAN) {
     console.log(`ccdeck → http://127.0.0.1:${PORT}`);
     return;

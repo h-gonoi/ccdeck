@@ -72,6 +72,16 @@ button { font-family: inherit; cursor: pointer; }
 }
 .brand::after { content: "·"; color: var(--amber); margin-left: 5px; }
 
+/* 新しい版の知らせ。琥珀は「あなたの番」専用なので使わない */
+.upgrade {
+  margin: 0 var(--s-md) var(--s-sm);
+  padding: var(--s-sm) 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.upgrade__text { margin: 0 0 var(--s-sm); color: var(--dim); font-size: 11.5px; line-height: 1.6; }
+.upgrade__actions { display: flex; align-items: center; gap: var(--s-sm); }
+
 .rail__scroll { overflow-y: auto; padding-bottom: var(--s-xl); flex: 1; min-height: 0; }
 .rail__title {
   display: flex; align-items: center; gap: var(--s-sm);

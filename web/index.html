@@ -15,6 +15,15 @@
       <button class="icon-btn" id="btn-new" title="新しいセッション (⌘N)" aria-haspopup="true">＋</button>
     </header>
 
+    <!-- 新しい版があるときだけ出る。入れ替えは全員の手が空くのを待ってから -->
+    <div class="upgrade" id="upgrade" hidden>
+      <p class="upgrade__text" id="upgrade-text"></p>
+      <div class="upgrade__actions">
+        <button class="ghost-btn" id="upgrade-arm" type="button">手が空いたら入れ替える</button>
+        <button class="link-btn" id="upgrade-cancel" type="button" hidden>やめる</button>
+      </div>
+    </div>
+
     <div class="rail__scroll">
       <h2 class="rail__title">セッション <span class="rail__count" id="session-count"></span></h2>
       <ul class="sessions" id="session-list"></ul>

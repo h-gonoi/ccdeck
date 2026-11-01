@@ -9,6 +9,7 @@ final class Rail: NSView {
     private let stack = NSStackView()
     private var scroll: NSScrollView!
 
+    private let upgradeBody = vstack([], spacing: 6)
     private let sessionTitle = NSStackView()
     private let sessionList = vstack([], spacing: 1)
     private let sessionEmpty = paragraph("走っているセッションはありません。\n下のプロジェクトを選ぶと始まります。")
@@ -53,7 +54,7 @@ final class Rail: NSView {
             scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
 
-        for (view, gap) in [(sessionTitle, 4.0), (sessionList, 0), (sessionEmpty, 0),
+        for (view, gap) in [(upgradeBody, 0.0), (sessionTitle, 4.0), (sessionList, 0), (sessionEmpty, 0),
                             (externalTitle, 14), (externalList, 0),
                             (butlerTitle, 14), (butlerBody, 0),
                             (projectTitle, 14), (projectList, 0),
@@ -79,11 +80,49 @@ final class Rail: NSView {
     }
 
     func renderAll() {
+        renderUpgrade()
         renderSessions()
         renderExternal()
         renderButler()
         renderProjects()
         renderMobile()
+    }
+
+    // ---------- 新しい版 ----------
+
+    private static let waitReason = [
+        "starting": "起動中", "running": "作業中", "attention": "承認待ち", "draft": "打ちかけ", "butler": "見立て・手順の途中",
+    ]
+
+    // 新しい版があるときだけ出す。琥珀は「あなたの番」専用なので使わない
+    func renderUpgrade() {
+        let up = c.upgrade
+        let stale = up?["stale"] as? Bool ?? false
+        let armed = up?["armed"] as? Bool ?? false
+        let restarting = up?["restarting"] as? Bool ?? false
+        let waiting = up?["waiting"] as? [JSON] ?? []
+        upgradeBody.isHidden = !stale && !restarting
+        guard !upgradeBody.isHidden else { upgradeBody.setViews([]); return }
+
+        var text = "新しい版があります。"
+        if restarting { text = "入れ替えています…" }
+        else if armed && !waiting.isEmpty {
+            let who = waiting.map { w -> String in
+                let name = w["title"] as? String ?? w["id"] as? String ?? "?"
+                let reason = w["reason"] as? String ?? ""
+                return "\(name)（\(Rail.waitReason[reason] ?? reason)）"
+            }
+            text = "手が空くのを待っています: " + who.joined(separator: "、")
+        } else if armed { text = "全員の手が空いています。まもなく入れ替えます。" }
+
+        var views: [NSView] = [paragraph(text, size: 11.5)]
+        if !restarting {
+            views.append(armed
+                ? Button("やめる", style: .link) { [weak self] in self?.c.cancelUpgrade() }
+                : Button("手が空いたら入れ替える", style: .ghost) { [weak self] in self?.c.armUpgrade() })
+        }
+        upgradeBody.setViews(views)
+        stack.setCustomSpacing(14, after: upgradeBody)   // 下のセッション見出しと詰まらないように
     }
 
     // ---------- セッション ----------
