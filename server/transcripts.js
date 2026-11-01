@@ -232,6 +232,9 @@ function codexTranscript(session) {
 
 // rollout-2026-08-26T23-32-37-<uuid>.jsonl の末尾が resume に使う ID
 function codexSessionId(session) {
+  // resume で続けている会話は、始めた日の記録に書き足される（ID は変わらない）。
+  // 開始時刻で探すと、後から同じ場所で立てた別の会話を拾ってしまうので、判っている ID を使う。
+  if (session.resumeId) return session.resumeId;
   const file = codexTranscript(session);
   if (!file) return null;
   return UUID.exec(path.basename(file, '.jsonl'))?.[1] ?? null;
