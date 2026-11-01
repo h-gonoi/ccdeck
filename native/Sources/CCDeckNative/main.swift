@@ -4,7 +4,7 @@ import AppKit
 // サーバー（server/）はそのまま。ブラウザ版と同じ WebSocket・REST に繋ぐ、もう一つの受け手。
 //
 //   CCDECK_PORT=7799 swift run    … 試験サーバーに繋ぐ（既定は 7788）
-//   open build/ccdeck.app --args --port 7799
+//   open build/ccdeck-native.app --args --port 7799
 
 // .app を open で起こすと環境変数が渡らないので、--port でも受ける
 let args = CommandLine.arguments
