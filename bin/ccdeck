@@ -9,6 +9,8 @@ STATE_DIR="${CCDECK_HOME:-$HOME/.ccdeck}"
 LOG="$STATE_DIR/server.log"
 PID_FILE="$STATE_DIR/server.pid"
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+# ネイティブ版（native/build-app で作る）。あればこちらで開き、無ければ Chrome の --app に戻る
+NATIVE="$ROOT/native/build/ccdeck-native.app"
 
 # メニューバーから起動した login shell は、普段のターミナルと別の Node を拾うことがある。
 # native addon（node-pty）を npm install した Node と揃えるため、NVM の default を優先する。
@@ -73,6 +75,11 @@ start_server() {
 }
 
 open_window() {
+  if [[ -d "$NATIVE" ]]; then
+    # 既に開いていれば手前に出るだけ（--args は起動するときにしか渡らない）
+    open "$NATIVE" --args --port "$PORT"
+    return 0
+  fi
   if [[ ! -x "$CHROME" ]]; then
     echo "Chrome が見つかりません。ブラウザで $URL を開いてください。"
     return 0

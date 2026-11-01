@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# ネイティブ版を .app に包む。通知センターは .app でないと使えないので、普段使いはこちら。
+#   ./build-app            → native/build/ccdeck-native.app
+# 名前をメニューバー常駐アプリ（ccdeck.app）と分けているのは、
+# `pkill -f "ccdeck.app/Contents/MacOS/ccdeck"` の巻き添えにしないため。
+# インストールはしない（どこへ置くかは使う人が決める）。
+set -euo pipefail
+cd "$(dirname "$0")"
+
+swift build -c release
+APP=build/ccdeck-native.app
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp .build/release/CCDeckNative "$APP/Contents/MacOS/ccdeck-native"
+# アイコンは icon/ の書き出し（メニューバー常駐アプリと揃えてある）
+cp ../icon/out/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+
+cat > "$APP/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>dev.ccdeck.deck</string>
+  <key>CFBundleName</key><string>ccdeck</string>
+  <key>CFBundleDisplayName</key><string>ccdeck</string>
+  <key>CFBundleExecutable</key><string>ccdeck-native</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+</dict>
+</plist>
+PLIST
+
+codesign --force --deep --sign - "$APP" >/dev/null
+echo "→ $(pwd)/$APP"

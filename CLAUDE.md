@@ -20,6 +20,10 @@ npm run build                        # web/ → dist/
 画面だけの修正なら `npm run build` のあと、開いている画面を ⌘R すれば足りる。
 サーバーを再起動した場合は、起動 ID が変わるので画面が自分でリロードする（`BUILD_ID`）。
 
+ネイティブ版（`native/`）を直したときは `cd native && ./build-app` のあと、開いている
+`ccdeck-native.app` を終了して開き直す。.app の名前をメニューバー常駐アプリ（`ccdeck.app`）と
+分けてあるのは、下の `pkill -f "ccdeck.app/Contents/MacOS/ccdeck"` の巻き添えにしないため。
+
 メニューバー常駐アプリを直したときは:
 
 ```sh
@@ -49,6 +53,11 @@ web/
   editor.js    CodeMirror。開いたときだけ動的 import する
 menubar/
   main.swift   NSStatusItem の常駐アプリ
+native/
+  Sources/CCDeckNative/  PC の画面のネイティブ版（AppKit＋SwiftTerm）。web/ と同じ API に繋ぐもう一つの受け手
+  build-app    build/ccdeck-native.app を作る。あれば `ccdeck open` がこちらを開く
+icon/
+  *.svg / render  アイコンの元絵と書き出し。out/ はリポジトリに入れてある（rsvg-convert が無くても組める）
 mobile/
   src/deck.ts  React Native 側の WebSocket・再接続・chat/text 購読・入力
   src/screens/ Lobby（部屋の絵＋住人一覧）・Room（会話・入力・承認）・Butler・Pair・Settings
