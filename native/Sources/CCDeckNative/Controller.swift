@@ -37,7 +37,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMen
     private var previousExternal: [Int: String] = [:]
     private var owned: [String: Bool] = [:]
     private var claimedAt: [String: Date] = [:]   // 取り返した時刻。往復よけ
-    private var killArmed = false
+    private var killArmed: String?    // 「本当に終了」を出しているセッション。入力先が替われば解く
     private var pairTimer: Timer?
 
     // 開き直したときに同じ並びへ戻れるように覚えておく（web 版の localStorage にあたる）
@@ -367,6 +367,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMen
     }
 
     func setActive(_ id: String) {
+        if killArmed != id { killArmed = nil }
         activeId = id
         for (key, pane) in paneViews { pane.isActive = key == id }
         focusActive()
@@ -748,15 +749,17 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMen
         // 終了は二段階。一度目で「本当に終了」に変わり、4 秒で戻る
         head.kill.onPress = { [weak self] in
             guard let self, let id = self.activeId, let s = self.sessions.first(where: { $0.id == id }) else { return }
-            if self.killArmed {
-                self.killArmed = false
+            if self.killArmed == id {
+                self.killArmed = nil
                 self.killSession(s)
             } else {
-                self.killArmed = true
+                self.killArmed = id
                 self.renderStage()
+                // 古い押下のタイマーで、押し直した方まで解かない
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
-                    self?.killArmed = false
-                    self?.renderStage()
+                    guard let self, self.killArmed == id else { return }
+                    self.killArmed = nil
+                    self.renderStage()
                 }
             }
         }
@@ -769,7 +772,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMen
         head.setIdentityHidden(panes.isEmpty)
         head.tile.title = tiled ? "1つに戻す" : "並べる"
         head.git.title = "変更 \(root.drawer.changeCount)"
-        head.kill.title = killArmed ? "本当に終了" : "終了"
+        head.kill.title = killArmed != nil && killArmed == activeId ? "本当に終了" : "終了"
         for (button, agent) in [(head.claude, "claude"), (head.codex, "codex")] {
             let selected = (session?.agentKey ?? "claude") == agent
             button.on = selected
